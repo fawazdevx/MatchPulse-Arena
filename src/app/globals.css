@@ -1,0 +1,224 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 48% 6%;
+    --foreground: 210 40% 98%;
+    --card: 222 35% 11%;
+    --card-foreground: 210 40% 98%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 35% 10%;
+    --primary: 211 100% 56%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 18% 18%;
+    --secondary-foreground: 210 34% 92%;
+    --muted: 221 24% 16%;
+    --muted-foreground: 217 13% 66%;
+    --accent: 156 78% 46%;
+    --accent-foreground: 221 52% 8%;
+    --destructive: 354 78% 58%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 24% 24%;
+    --input: 220 24% 24%;
+    --ring: 211 100% 56%;
+    --radius: 1.25rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    background:
+      radial-gradient(circle at 18% 0%, rgba(24, 111, 255, 0.25), transparent 32rem),
+      radial-gradient(circle at 86% 18%, rgba(33, 213, 151, 0.18), transparent 30rem),
+      linear-gradient(145deg, #060b18 0%, #0b1224 42%, #070912 100%);
+    min-height: 100vh;
+  }
+
+  ::selection {
+    background: rgba(48, 132, 255, 0.35);
+  }
+
+  :focus-visible {
+    outline: 2px solid rgba(77, 163, 255, 0.95);
+    outline-offset: 3px;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .pulse-grid {
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  .safe-bottom {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .arena-shell {
+    background:
+      radial-gradient(circle at 20% -10%, rgba(45, 136, 255, 0.34), transparent 38rem),
+      radial-gradient(circle at 90% 4%, rgba(34, 211, 153, 0.2), transparent 34rem),
+      linear-gradient(145deg, #050915 0%, #081126 45%, #070912 100%);
+  }
+
+  .glass-card {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.055));
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+    backdrop-filter: blur(18px);
+  }
+
+  .glass-card-soft {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.075);
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(14px);
+  }
+
+  .premium-card {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: linear-gradient(145deg, rgba(13, 23, 45, 0.94), rgba(10, 17, 33, 0.88));
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  }
+
+  .live-dot {
+    position: relative;
+  }
+
+  .live-dot::before {
+    content: "";
+    width: 0.52rem;
+    height: 0.52rem;
+    border-radius: 999px;
+    background: #ff4664;
+    box-shadow: 0 0 0 0 rgba(255, 70, 100, 0.58);
+    animation: livePulse 1.7s infinite;
+  }
+
+  .shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-120%);
+    background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.28), transparent 65%);
+    animation: shimmer 2.7s infinite;
+  }
+
+  .score-pop {
+    animation: scorePop 520ms cubic-bezier(0.2, 0.9, 0.25, 1);
+  }
+
+  .float-in {
+    animation: floatIn 520ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+  }
+
+  .momentum-wave {
+    animation: waveDrift 8s linear infinite;
+  }
+
+  .pulse-track {
+    animation: pulseTrack 1.8s ease-in-out infinite;
+  }
+
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .reduced-motion-safe {
+    transform: translateZ(0);
+  }
+}
+
+@keyframes livePulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 70, 100, 0.58);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(255, 70, 100, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 70, 100, 0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-120%);
+  }
+  50%, 100% {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes scorePop {
+  0% {
+    transform: scale(0.88);
+    filter: brightness(1.4);
+  }
+  55% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
+
+@keyframes floatIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes waveDrift {
+  from {
+    transform: translateX(-18px);
+  }
+  to {
+    transform: translateX(18px);
+  }
+}
+
+@keyframes pulseTrack {
+  0%, 100% {
+    opacity: 0.72;
+    filter: brightness(1);
+  }
+  50% {
+    opacity: 1;
+    filter: brightness(1.35);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
+}
