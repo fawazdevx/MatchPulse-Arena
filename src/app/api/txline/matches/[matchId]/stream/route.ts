@@ -1,4 +1,6 @@
 import { getTxLineAdapter } from "@/services/txline";
+import { getTxLineReadiness } from "@/lib/server/env";
+import { TxLineSetupError } from "@/services/txline";
 
 const encoder = new TextEncoder();
 
@@ -7,12 +9,17 @@ function encodeEvent(event: string, payload: unknown) {
 }
 
 export async function GET(request: Request, context: { params: { matchId: string } }) {
+  const readiness = getTxLineReadiness();
+
   const stream = new ReadableStream({
     async start(controller) {
       controller.enqueue(
         encodeEvent("connected", {
           mode: new URL(request.url).searchParams.get("mode") ?? "replay",
-          provider: process.env.TXLINE_GUEST_JWT && process.env.TXLINE_API_TOKEN ? "txline" : "mock-txline",
+          provider: readiness.provider,
+          adapter: readiness.adapter,
+          network: readiness.network,
+          liveReady: readiness.ready,
           connectedAt: new Date().toISOString()
         })
       );
@@ -30,7 +37,12 @@ export async function GET(request: Request, context: { params: { matchId: string
       } catch (error) {
         controller.enqueue(
           encodeEvent("error", {
-            message: error instanceof Error ? error.message : "Stream failed"
+            message:
+              error instanceof TxLineSetupError
+                ? "TxLINE live mode needs server credentials. Set TXLINE_ADAPTER=mock for replay mode or configure live credentials."
+                : error instanceof Error
+                  ? error.message
+                  : "Stream failed"
           })
         );
       } finally {

@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   Sparkles,
   Trophy,
+  Wallet,
   XCircle
 } from "lucide-react";
 import type {
@@ -74,6 +75,35 @@ interface CreatorConfig {
   inviteCode: string;
 }
 
+interface AuthUser {
+  id: string;
+  walletAddress: string;
+  name: string;
+  avatar: string;
+  points: number;
+  streak: number;
+  bestStreak: number;
+  badges: BadgeId[];
+}
+
+interface InjectedSolanaWallet {
+  publicKey?: { toBase58(): string };
+  connect(): Promise<{ publicKey?: { toBase58(): string } } | void>;
+  disconnect?(): Promise<void>;
+  signTransaction?<T>(transaction: T): Promise<T>;
+  signAllTransactions?<T>(transactions: T[]): Promise<T[]>;
+  signMessage(message: Uint8Array, display?: "utf8" | "hex"): Promise<Uint8Array | { signature: Uint8Array }>;
+}
+
+declare global {
+  interface Window {
+    phantom?: {
+      solana?: InjectedSolanaWallet;
+    };
+    solflare?: InjectedSolanaWallet;
+  }
+}
+
 const defaultFan: FanState = {
   points: 980,
   streak: 2,
@@ -117,6 +147,19 @@ function formatKickoff(value: string) {
     hour: "numeric",
     minute: "2-digit"
   }).format(new Date(value));
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return window.btoa(binary);
+}
+
+function getInjectedSolanaWallet() {
+  if (typeof window === "undefined") return null;
+  return window.phantom?.solana ?? window.solflare ?? null;
 }
 
 function scorePrediction(card: PredictionCard, selectedOptionId: string, fan: FanState, resolvingEvent?: MatchEvent) {
@@ -198,6 +241,9 @@ export default function MatchPulseArena() {
     inviteCode: "FINALTHIRD-ESPAUT"
   });
   const [lastTick, setLastTick] = useState<ReplayTick | null>(null);
+  const [walletUser, setWalletUser] = useState<AuthUser | null>(null);
+  const [walletStatus, setWalletStatus] = useState<"idle" | "connecting" | "connected" | "error">("idle");
+  const [walletError, setWalletError] = useState<string | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
 
   const selectedFixture = useMemo(
@@ -331,18 +377,19 @@ export default function MatchPulseArena() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: "you",
+          userId: walletUser?.id ?? "you",
           predictionId: card.id,
           optionId: selectedOption,
           answeredAtMs: Math.round(performance.now()),
           correct: result.correct,
           pointsAwarded: result.points,
           txlineEventId: event?.id,
-          badgesUnlocked: unlocked
+          badgesUnlocked: unlocked,
+          roomId: selectedFixture ? `room-${selectedFixture.id}` : undefined
         })
       }).catch(() => undefined);
     },
-    [fan, predictionState, selectedOption, setFan]
+    [fan, predictionState, selectedFixture, selectedOption, setFan, walletUser]
   );
 
   const applyTick = useCallback(
@@ -408,6 +455,90 @@ export default function MatchPulseArena() {
     return () => sourceRef.current?.close();
   }, []);
 
+  useEffect(() => {
+    fetch("/api/auth/wallet/session", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data: { authenticated?: boolean; user?: AuthUser }) => {
+        if (data.authenticated && data.user) {
+          setWalletUser(data.user);
+          setWalletStatus("connected");
+          setFan((current) => ({
+            ...current,
+            points: data.user?.points ?? current.points,
+            streak: data.user?.streak ?? current.streak,
+            bestStreak: data.user?.bestStreak ?? current.bestStreak,
+            badges: data.user?.badges?.length ? data.user.badges : current.badges
+          }));
+        }
+      })
+      .catch(() => undefined);
+  }, [setFan]);
+
+  const connectWallet = async () => {
+    setWalletStatus("connecting");
+    setWalletError(null);
+
+    try {
+      const wallet = getInjectedSolanaWallet();
+      if (!wallet) {
+        throw new Error("Install Phantom or Solflare, then reload MatchPulse Arena.");
+      }
+
+      const connectionResult = await wallet.connect();
+      const walletAddress = connectionResult?.publicKey?.toBase58() ?? wallet.publicKey?.toBase58();
+      if (!walletAddress) {
+        throw new Error("Wallet connected, but no public key was returned.");
+      }
+
+      const nonceResponse = await fetch("/api/auth/wallet/nonce", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress })
+      });
+      const noncePayload = (await nonceResponse.json()) as { sessionId?: string; message?: string; error?: string };
+      if (!nonceResponse.ok || !noncePayload.sessionId || !noncePayload.message) {
+        throw new Error(noncePayload.error ?? "Could not start wallet sign-in.");
+      }
+
+      const signatureResult = await wallet.signMessage(new TextEncoder().encode(noncePayload.message), "utf8");
+      const signatureBytes = signatureResult instanceof Uint8Array ? signatureResult : signatureResult.signature;
+      const verifyResponse = await fetch("/api/auth/wallet/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: noncePayload.sessionId,
+          walletAddress,
+          signature: bytesToBase64(signatureBytes)
+        })
+      });
+      const verifyPayload = (await verifyResponse.json()) as { user?: AuthUser; error?: string };
+      if (!verifyResponse.ok || !verifyPayload.user) {
+        throw new Error(verifyPayload.error ?? "Wallet signature was rejected.");
+      }
+
+      setWalletUser(verifyPayload.user);
+      setWalletStatus("connected");
+      setFan((current) => ({
+        ...current,
+        points: verifyPayload.user?.points ?? current.points,
+        streak: verifyPayload.user?.streak ?? current.streak,
+        bestStreak: verifyPayload.user?.bestStreak ?? current.bestStreak,
+        badges: verifyPayload.user?.badges?.length ? verifyPayload.user.badges : current.badges
+      }));
+    } catch (error) {
+      setWalletStatus("error");
+      setWalletError(error instanceof Error ? error.message : "Wallet connection failed.");
+    }
+  };
+
+  const disconnectWallet = async () => {
+    await fetch("/api/auth/wallet/logout", { method: "POST" }).catch(() => undefined);
+    await getInjectedSolanaWallet()?.disconnect?.().catch(() => undefined);
+    setWalletUser(null);
+    setWalletStatus("idle");
+    setWalletError(null);
+  };
+
   const handleAnswer = (optionId: string) => {
     if (!activePrediction || predictionState === "locked" || predictionState === "resolved") {
       return;
@@ -431,12 +562,12 @@ export default function MatchPulseArena() {
   return (
     <main className="arena-shell min-h-screen text-white">
       <div className="fixed inset-x-0 top-0 z-40 border-b border-white/10 bg-[#071026]/[0.74] backdrop-blur-2xl">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
+        <div className="mx-auto flex h-16 max-w-screen-2xl items-center justify-between gap-2 px-3 sm:px-4">
           <button className="group flex items-center gap-2 text-left" onClick={() => setScreen("home")} aria-label="Go to match list">
             <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#2F8CFF,#20E3B2)] text-sm font-black text-white shadow-[0_12px_34px_rgba(47,140,255,0.28)] transition group-hover:scale-105">MP</span>
-            <span>
-              <span className="block text-sm font-black tracking-normal text-white">MatchPulse Arena</span>
-              <span className="block text-xs font-medium text-white/[0.54]">World Cup live room</span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-black tracking-normal text-white">MatchPulse Arena</span>
+              <span className="block truncate text-xs font-medium text-white/[0.54] max-[360px]:hidden">World Cup live room</span>
             </span>
           </button>
           <div className="hidden items-center gap-2 md:flex">
@@ -449,14 +580,26 @@ export default function MatchPulseArena() {
               Reset
             </Button>
           </div>
+          <Button
+            size="sm"
+            variant={walletUser ? "success" : walletStatus === "error" ? "outline" : "secondary"}
+            onClick={walletUser ? disconnectWallet : connectWallet}
+            title={walletError ?? (walletUser ? walletUser.walletAddress : "Connect Phantom or Solflare")}
+            disabled={walletStatus === "connecting"}
+          >
+            <Wallet className="mr-2 h-4 w-4" />
+            <span className="hidden sm:inline">
+              {walletUser ? `${walletUser.walletAddress.slice(0, 4)}...${walletUser.walletAddress.slice(-4)}` : walletStatus === "connecting" ? "Signing" : "Wallet"}
+            </span>
+          </Button>
           <Button size="sm" variant="pulse" onClick={startReplay}>
             <Play className="mr-2 h-4 w-4" />
-            Replay
+            <span className="max-[340px]:sr-only">Replay</span>
           </Button>
         </div>
       </div>
 
-      <div className="mx-auto grid max-w-7xl gap-5 px-4 pb-28 pt-20 lg:grid-cols-[280px_minmax(0,1fr)_320px] lg:pb-8">
+      <div className="mx-auto grid w-full max-w-screen-2xl gap-5 px-3 pb-28 pt-20 sm:px-4 lg:grid-cols-[260px_minmax(0,1fr)] lg:pb-8 2xl:grid-cols-[280px_minmax(0,1fr)_320px]">
         <aside className="hidden lg:block">
           <NavRail current={screen} onChange={setScreen} rank={currentRank} streak={fan.streak} />
         </aside>
@@ -523,7 +666,7 @@ export default function MatchPulseArena() {
           {screen === "tech" && <TechScreen />}
         </section>
 
-        <aside className="hidden lg:block">
+        <aside className="hidden 2xl:block">
           <RightRail fan={fan} users={topRank} creator={creatorConfig} onScreen={setScreen} />
         </aside>
       </div>
@@ -602,12 +745,12 @@ function HomeScreen({
     <div className="space-y-5">
       <section className="relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(135deg,rgba(18,42,84,0.96),rgba(6,11,24,0.92))] text-white shadow-[0_34px_110px_rgba(0,0,0,0.38)]">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_76%_10%,rgba(47,140,255,0.34),transparent_24rem),radial-gradient(circle_at_12%_92%,rgba(32,227,178,0.16),transparent_22rem)]" />
-        <div className="pulse-grid relative grid gap-5 p-5 sm:grid-cols-[1.12fr_0.88fr] sm:p-7 lg:p-8">
+        <div className="pulse-grid relative grid gap-5 p-4 sm:grid-cols-[1.12fr_0.88fr] sm:p-7 lg:p-8">
           <div>
             <Badge variant="live" className="mb-4 gap-2 live-dot border-white/[0.18] bg-white/10 text-white">
               No-money prediction arena
             </Badge>
-            <h1 className="max-w-xl text-balance text-4xl font-black tracking-normal sm:text-6xl">
+            <h1 className="max-w-xl text-balance text-[2.35rem] font-black leading-[1.02] tracking-normal sm:text-6xl">
               Read the World Cup pulse before the room does.
             </h1>
             <p className="mt-5 max-w-2xl text-sm leading-7 text-white/70 sm:text-base">
@@ -642,8 +785,8 @@ function HomeScreen({
       </section>
 
       <section className="space-y-3">
-        <div className="flex items-end justify-between">
-          <div>
+        <div className="flex flex-col gap-2 min-[420px]:flex-row min-[420px]:items-end min-[420px]:justify-between">
+          <div className="min-w-0">
             <h2 className="text-2xl font-black text-white">Today&apos;s World Cup rooms</h2>
             <p className="text-sm text-white/[0.55]">July 3, 2026 demo fixtures with replay-ready TxLINE mock streams.</p>
           </div>
@@ -674,9 +817,9 @@ function MatchCard({ fixture, active, onSelect }: { fixture: MatchFixture; activ
         </Badge>
         {fixture.creatorRoom && <Badge variant="creator">Creator Cup</Badge>}
       </div>
-      <div className="mt-4 flex items-center justify-between gap-3">
+      <div className="mt-4 flex items-center justify-between gap-2 sm:gap-3">
         <TeamMark team={fixture.home} />
-        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-black text-white/[0.56] ring-1 ring-white/10">VS</span>
+        <span className="shrink-0 rounded-full bg-white/10 px-2.5 py-1 text-xs font-black text-white/[0.56] ring-1 ring-white/10">VS</span>
         <TeamMark team={fixture.away} align="right" />
       </div>
       <div className="mt-4 flex items-center justify-between text-xs text-white/[0.48]">
@@ -694,16 +837,16 @@ function TeamMark({ team, align = "left" }: { team: MatchFixture["home"]; align?
   return (
     <div className={cn("flex min-w-0 flex-1 items-center gap-2", align === "right" && "justify-end text-right")}>
       {align === "left" && (
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-sm font-black text-white shadow-[0_12px_30px_rgba(0,0,0,0.28)] ring-1 ring-white/[0.16]" style={{ backgroundColor: team.color }}>
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-xs font-black text-white shadow-[0_12px_30px_rgba(0,0,0,0.28)] ring-1 ring-white/[0.16] sm:h-11 sm:w-11 sm:text-sm" style={{ backgroundColor: team.color }}>
           {team.crest}
         </span>
       )}
       <span className="min-w-0">
-        <span className="block truncate text-base font-black text-white">{team.name}</span>
+        <span className="block truncate text-sm font-black text-white sm:text-base">{team.name}</span>
         <span className="block text-xs font-semibold text-white/[0.48]">{team.record}</span>
       </span>
       {align === "right" && (
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-sm font-black text-white shadow-[0_12px_30px_rgba(0,0,0,0.28)] ring-1 ring-white/[0.16]" style={{ backgroundColor: team.color }}>
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-xs font-black text-white shadow-[0_12px_30px_rgba(0,0,0,0.28)] ring-1 ring-white/[0.16] sm:h-11 sm:w-11 sm:text-sm" style={{ backgroundColor: team.color }}>
           {team.crest}
         </span>
       )}
@@ -791,28 +934,28 @@ function Scoreboard({
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_0%,rgba(47,140,255,0.26),transparent_22rem),radial-gradient(circle_at_82%_10%,rgba(34,211,153,0.16),transparent_20rem)]" />
       <CardContent className="p-0">
         <div className="relative p-4 text-white sm:p-6">
-          <div className="flex items-center justify-between gap-3">
-            <div>
+          <div className="flex flex-col gap-3 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between">
+            <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="live" className={cn("gap-2", clock.phase !== "full" && "live-dot")}>{clock.phase === "full" ? "Full time" : "Live"}</Badge>
                 <Badge className="bg-white/10 text-white">{fixture.stage}</Badge>
               </div>
-              <p className="mt-2 text-xs font-semibold text-white/[0.52]">{fixture.competition} / {fixture.venue}</p>
+              <p className="mt-2 truncate text-xs font-semibold text-white/[0.52]">{fixture.competition} / {fixture.venue}</p>
             </div>
-            <div className="text-right">
-              <p className="font-mono text-3xl font-black tabular-nums">{clock.label}</p>
+            <div className="min-[420px]:text-right">
+              <p className="font-mono text-2xl font-black tabular-nums sm:text-3xl">{clock.label}</p>
               <p className="text-xs font-semibold text-white/[0.52]">{streamStatus === "connected" ? "SSE connected" : "Replay ready"}</p>
             </div>
           </div>
-          <div className="mt-7 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+          <div className="mt-6 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 sm:mt-7 sm:gap-3">
             <ScoreTeam team={fixture.home} side="home" score={score.home} />
-            <div className="score-pop rounded-[1.25rem] border border-white/[0.18] bg-white px-4 py-3 text-center text-4xl font-black tabular-nums text-[#071026] shadow-[0_18px_48px_rgba(255,255,255,0.16)] sm:text-6xl">
+            <div className="score-pop min-w-[4.75rem] rounded-[1.15rem] border border-white/[0.18] bg-white px-3 py-2 text-center text-3xl font-black tabular-nums text-[#071026] shadow-[0_18px_48px_rgba(255,255,255,0.16)] sm:min-w-[7rem] sm:rounded-[1.25rem] sm:px-4 sm:py-3 sm:text-6xl">
               {score.home}-{score.away}
             </div>
             <ScoreTeam team={fixture.away} side="away" score={score.away} />
           </div>
-          <div className="mt-5 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.08] px-3 py-2">
-            <div className="flex min-w-max gap-6 text-xs font-bold text-white/[0.66]">
+          <div className="scrollbar-none mt-5 overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.08] px-3 py-2">
+            <div className="flex w-max max-w-none gap-6 text-xs font-bold text-white/[0.66]">
               {(events.length ? events.slice(0, 5) : [{ id: "ticker-empty", minute: clock.minute, title: sentiment.label } as MatchEvent]).map((event) => (
                 <span key={event.id} className="flex items-center gap-2">
                   <span className="h-1.5 w-1.5 rounded-full bg-[#22D391]" />
@@ -835,16 +978,16 @@ function ScoreTeam({ team, side }: { team: MatchFixture["home"]; side: TeamKey; 
     <div className={cn("min-w-0", teamSideClass[side])}>
       <div className={cn("flex items-center gap-2", side === "away" && "justify-end")}>
         {side === "home" && (
-          <span className="flex h-12 w-12 items-center justify-center rounded-2xl text-sm font-black text-white shadow-[0_16px_36px_rgba(0,0,0,0.35)] ring-1 ring-white/[0.16] sm:h-14 sm:w-14" style={{ backgroundColor: team.color }}>
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-xs font-black text-white shadow-[0_16px_36px_rgba(0,0,0,0.35)] ring-1 ring-white/[0.16] sm:h-14 sm:w-14 sm:text-sm" style={{ backgroundColor: team.color }}>
             {team.crest}
           </span>
         )}
         <div className="min-w-0">
-          <p className="truncate text-2xl font-black sm:text-3xl">{team.shortName}</p>
-          <p className="truncate text-xs font-semibold text-white/[0.54] sm:text-sm">{team.name}</p>
+          <p className="truncate text-xl font-black sm:text-3xl">{team.shortName}</p>
+          <p className="hidden truncate text-xs font-semibold text-white/[0.54] min-[390px]:block sm:text-sm">{team.name}</p>
         </div>
         {side === "away" && (
-          <span className="flex h-12 w-12 items-center justify-center rounded-2xl text-sm font-black text-white shadow-[0_16px_36px_rgba(0,0,0,0.35)] ring-1 ring-white/[0.16] sm:h-14 sm:w-14" style={{ backgroundColor: team.color }}>
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-xs font-black text-white shadow-[0_16px_36px_rgba(0,0,0,0.35)] ring-1 ring-white/[0.16] sm:h-14 sm:w-14 sm:text-sm" style={{ backgroundColor: team.color }}>
             {team.crest}
           </span>
         )}
@@ -857,8 +1000,8 @@ function MomentumBar({ fixture, sentiment }: { fixture: MatchFixture; sentiment:
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
-        <p className="text-sm font-black text-white">Fan momentum</p>
-        <p className="text-xs font-semibold text-white/[0.54]">{sentiment.label}</p>
+        <p className="shrink-0 text-sm font-black text-white">Fan momentum</p>
+        <p className="min-w-0 truncate pl-3 text-right text-xs font-semibold text-white/[0.54]">{sentiment.label}</p>
       </div>
       <div className="flex h-5 overflow-hidden rounded-full bg-white/10 p-0.5 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]">
         <div className="transition-all duration-500" style={{ width: `${sentiment.home}%`, backgroundColor: fixture.home.color }} />
@@ -910,8 +1053,8 @@ function PredictionPanel({
     <Card className="glass-card relative overflow-hidden border-0">
       <div className="absolute inset-x-0 top-0 h-1 bg-[linear-gradient(90deg,#2F8CFF,#22D391,#FFD166)]" />
       <CardHeader className="border-b border-white/10 bg-white/[0.035] pb-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="flex flex-col gap-3 min-[420px]:flex-row min-[420px]:items-start min-[420px]:justify-between">
+          <div className="min-w-0">
             <div className="mb-2 flex flex-wrap gap-2">
               <Badge variant="win">Micro-prediction</Badge>
               {card.sponsor && <Badge variant="creator">{card.sponsor.label}</Badge>}
@@ -920,7 +1063,7 @@ function PredictionPanel({
             <CardTitle className="text-xl leading-tight">{card.prompt}</CardTitle>
             <CardDescription className="mt-2">{card.context}</CardDescription>
           </div>
-          <div className="relative grid h-16 w-16 shrink-0 place-items-center rounded-full bg-[conic-gradient(#22D391_0_72%,rgba(255,255,255,0.12)_72%_100%)] p-1">
+          <div className="relative grid h-16 w-16 shrink-0 place-items-center rounded-full bg-[conic-gradient(#22D391_0_72%,rgba(255,255,255,0.12)_72%_100%)] p-1 min-[420px]:self-start">
             <div className="grid h-full w-full place-items-center rounded-full bg-[#081126] text-center">
               <p className="text-[10px] font-bold text-white/50">Locks</p>
               <p className="-mt-1 text-lg font-black text-white">{card.lockAt}&apos;</p>
@@ -953,7 +1096,7 @@ function PredictionPanel({
           })}
         </div>
         <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.07] p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-          <div>
+          <div className="min-w-0">
             <p className="font-bold text-white">
               {state === "resolved"
                 ? resolved?.correct
@@ -965,9 +1108,9 @@ function PredictionPanel({
                     ? "Answer saved. Locking with server time."
                     : "Answer before the next resolving TxLINE update."}
             </p>
-            <p className="text-xs text-white/[0.54]">{state === "resolved" ? resolved?.explanation : `Resolution source: ${card.source.endpoint}`}</p>
+            <p className="break-words text-xs text-white/[0.54]">{state === "resolved" ? resolved?.explanation : `Resolution source: ${card.source.endpoint}`}</p>
           </div>
-          <Button variant="outline" size="sm" onClick={onReplay} disabled={isReplaying}>
+          <Button className="shrink-0" variant="outline" size="sm" onClick={onReplay} disabled={isReplaying}>
             <Play className="mr-2 h-4 w-4" />
             {isReplaying ? "Running" : "Run stream"}
           </Button>
@@ -991,12 +1134,12 @@ function MomentumPanel({
   return (
     <Card className="glass-card-soft border-0">
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex flex-col gap-3 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between">
+          <div className="min-w-0">
             <CardTitle>Pressure graph</CardTitle>
             <CardDescription>Odds movement translated into fan-readable match pulse.</CardDescription>
           </div>
-          <LineChart className="h-5 w-5 text-[#0B7A53]" />
+          <LineChart className="h-5 w-5 shrink-0 text-[#0B7A53]" />
         </div>
       </CardHeader>
       <CardContent>
@@ -1057,7 +1200,7 @@ function Timeline({ events }: { events: MatchEvent[] }) {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
                   <p className="truncate text-sm font-black text-white">{event.title}</p>
-                  <Badge variant={event.impact === "high" ? "live" : "secondary"}>{event.stoppage ? `${event.minute}+${event.stoppage}'` : `${event.minute}'`}</Badge>
+                  <Badge className="shrink-0" variant={event.impact === "high" ? "live" : "secondary"}>{event.stoppage ? `${event.minute}+${event.stoppage}'` : `${event.minute}'`}</Badge>
                 </div>
                 <p className="mt-1 text-sm leading-6 text-white/[0.56]">{event.description}</p>
               </div>
@@ -1086,10 +1229,10 @@ function StreakCard({ fan }: { fan: FanState }) {
       <CardContent>
         <div className="relative overflow-hidden rounded-[1.35rem] border border-white/10 bg-[linear-gradient(145deg,rgba(255,176,32,0.14),rgba(255,255,255,0.06))] p-4 text-white">
           <div className="absolute inset-x-4 bottom-0 h-px bg-[linear-gradient(90deg,transparent,#FFD166,transparent)]" />
-          <div className="flex items-end justify-between">
+          <div className="flex items-end justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/60">Current combo</p>
-              <p className="mt-1 text-6xl font-black tabular-nums">{fan.streak}</p>
+              <p className="mt-1 text-5xl font-black tabular-nums sm:text-6xl">{fan.streak}</p>
             </div>
             <div className="text-right">
               <p className="text-xs font-semibold text-white/[0.55]">Next milestone</p>
@@ -1146,9 +1289,9 @@ function CreatorRoomCard({ fixture }: { fixture: MatchFixture }) {
               <p className="text-xs font-semibold text-white/[0.55]">{creator?.handle ?? "@yourroom"}</p>
             </div>
           </div>
-          <div className="mt-4 flex items-center justify-between rounded-2xl bg-white/10 px-3 py-2 text-xs font-semibold text-white/70 ring-1 ring-white/10">
+          <div className="mt-4 flex flex-col gap-1 rounded-2xl bg-white/10 px-3 py-2 text-xs font-semibold text-white/70 ring-1 ring-white/10 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between">
             <span>Invite</span>
-            <span className="font-mono text-white">{creator?.inviteCode ?? "ROOM-CODE"}</span>
+            <span className="break-all font-mono text-white">{creator?.inviteCode ?? "ROOM-CODE"}</span>
           </div>
           <div className="mt-3 rounded-2xl border border-[#FFD166]/20 bg-[#FFD166]/10 px-3 py-2 text-xs font-bold text-[#FFE49A]">
             Sponsored by {creator?.sponsor ?? "brand partner"}
@@ -1211,18 +1354,18 @@ function LeaderboardScreen({ users, currentRank }: { users: LeaderboardUser[]; c
       <SectionHeader icon={Crown} title="Room leaderboard" description={`You are currently #${currentRank || 4} in the live watch room.`} />
       <Card className="premium-card overflow-hidden border-0">
         <CardContent className="space-y-5 p-4 sm:p-5">
-          <div className="grid grid-cols-3 items-end gap-2 pt-3">
+          <div className="grid grid-cols-3 items-end gap-1 pt-3 sm:gap-2">
             {[podium[1], podium[0], podium[2]].map((user, displayIndex) => {
               if (!user) return <div key={displayIndex} />;
               const rank = users.findIndex((item) => item.id === user.id) + 1;
               const height = rank === 1 ? "h-32" : rank === 2 ? "h-24" : "h-20";
               return (
                 <div key={user.id} className="text-center">
-                  <div className={cn("mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-2xl text-sm font-black text-white ring-2", rank === 1 ? "bg-[#FFD166]/20 ring-[#FFD166]/[0.45]" : "bg-white/10 ring-white/[0.15]")}>{user.avatar}</div>
+                  <div className={cn("mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-2xl text-xs font-black text-white ring-2 sm:h-14 sm:w-14 sm:text-sm", rank === 1 ? "bg-[#FFD166]/20 ring-[#FFD166]/[0.45]" : "bg-white/10 ring-white/[0.15]")}>{user.avatar}</div>
                   <p className="truncate text-xs font-black text-white">{user.name}</p>
                   <p className="text-xs text-white/50">{user.points} pts</p>
-                  <div className={cn("mt-3 rounded-t-[1.35rem] border border-white/10 bg-white/[0.075] p-3", height)}>
-                    <p className={cn("text-3xl font-black", rank === 1 ? "text-[#FFD166]" : "text-white")}>#{rank}</p>
+                  <div className={cn("mt-3 rounded-t-[1.35rem] border border-white/10 bg-white/[0.075] p-2 sm:p-3", height)}>
+                    <p className={cn("text-2xl font-black sm:text-3xl", rank === 1 ? "text-[#FFD166]" : "text-white")}>#{rank}</p>
                   </div>
                 </div>
               );
@@ -1244,13 +1387,13 @@ function LeaderboardRow({ user, rank, compact = false }: { user: LeaderboardUser
 
   return (
     <div className={cn("group flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.07] p-3 transition duration-300 hover:-translate-y-0.5 hover:bg-white/[0.105]", user.id === "you" && "border-[#22D391]/50 bg-[#22D391]/10 shadow-[0_0_0_1px_rgba(34,211,145,0.18)]")}>
-      <span className={cn("w-8 text-center text-sm font-black tabular-nums", rankTone)}>#{rank}</span>
-      <span className={cn("flex h-11 w-11 items-center justify-center rounded-2xl text-xs font-black text-white ring-2", user.id === "you" ? "bg-[#22D391]/20 ring-[#22D391]/[0.45]" : "bg-white/10 ring-white/[0.12]")}>{user.avatar}</span>
+      <span className={cn("w-8 shrink-0 text-center text-sm font-black tabular-nums", rankTone)}>#{rank}</span>
+      <span className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-xs font-black text-white ring-2", user.id === "you" ? "bg-[#22D391]/20 ring-[#22D391]/[0.45]" : "bg-white/10 ring-white/[0.12]")}>{user.avatar}</span>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-black text-white">{user.name}</p>
         {!compact && <p className="text-xs text-white/[0.52]">Best streak {user.bestStreak} / {user.badges.length} badges</p>}
       </div>
-      <div className="text-right">
+      <div className="shrink-0 text-right">
         <p className="text-sm font-black tabular-nums text-white">{user.points}</p>
         <p className="text-xs text-[#FFD166]">{user.streak} streak</p>
       </div>
@@ -1265,7 +1408,7 @@ function PassportScreen({ fan, resolved }: { fan: FanState; resolved: ResolvedPr
     <div className="space-y-5">
       <SectionHeader icon={Medal} title="Fan Passport" description="Your streaks, badges, prediction reads, and shareable match result." />
       <Card className="premium-card overflow-hidden border-0">
-        <CardContent className="grid gap-4 p-4 sm:grid-cols-[0.8fr_1.2fr]">
+        <CardContent className="grid gap-4 p-4 md:grid-cols-[0.8fr_1.2fr]">
           <div className="relative overflow-hidden rounded-[1.5rem] border border-white/10 bg-[radial-gradient(circle_at_20%_0%,rgba(47,140,255,0.3),transparent_18rem),rgba(255,255,255,0.07)] p-5 text-white">
             <div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-[#FFD166]/20 blur-3xl" />
             <div className="flex items-center gap-3">
@@ -1275,7 +1418,7 @@ function PassportScreen({ fan, resolved }: { fan: FanState; resolved: ResolvedPr
                 <p className="text-xl font-black">Level {Math.max(1, Math.floor(fan.points / 500))}</p>
               </div>
             </div>
-            <p className="mt-5 text-5xl font-black tabular-nums">{fan.points}</p>
+            <p className="mt-5 text-4xl font-black tabular-nums sm:text-5xl">{fan.points}</p>
             <p className="text-sm text-white/70">points earned</p>
             <div className="mt-4 grid grid-cols-2 gap-2">
               <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
@@ -1290,7 +1433,7 @@ function PassportScreen({ fan, resolved }: { fan: FanState; resolved: ResolvedPr
           </div>
           <div>
             <h3 className="font-black text-white">Badge collection</h3>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 md:grid-cols-1 lg:grid-cols-2">
               {badges.map((badge) => {
                 const unlocked = fan.badges.includes(badge.id);
                 return (
@@ -1313,9 +1456,9 @@ function PassportScreen({ fan, resolved }: { fan: FanState; resolved: ResolvedPr
           {resolved.length ? (
             resolved.map((item) => (
               <div key={`${item.card.id}-${item.selectedOptionId}`} className="rounded-2xl border border-white/10 bg-white/[0.07] p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="font-black text-white">{item.card.prompt}</p>
-                  <Badge variant={item.correct ? "win" : "live"}>{item.correct ? `+${item.points}` : "Reset"}</Badge>
+                <div className="flex flex-col gap-2 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between">
+                  <p className="min-w-0 font-black text-white">{item.card.prompt}</p>
+                  <Badge className="w-fit shrink-0" variant={item.correct ? "win" : "live"}>{item.correct ? `+${item.points}` : "Reset"}</Badge>
                 </div>
                 <p className="mt-1 text-sm text-white/[0.56]">{item.explanation}</p>
               </div>
@@ -1347,7 +1490,10 @@ function CreatorScreen({
     const response = await fetch("/api/creator/rooms", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(config)
+      body: JSON.stringify({
+        ...config,
+        matchId: fixture?.id
+      })
     });
     const data = (await response.json()) as { inviteUrl: string };
     setStatus(`Room ready: ${data.inviteUrl}`);
@@ -1356,7 +1502,7 @@ function CreatorScreen({
   return (
     <div className="space-y-5">
       <SectionHeader icon={Sparkles} title="Creator Cup setup" description="B2B/B2B2C branded rooms for creators, communities, media pages, and sponsors." />
-      <div className="grid gap-5 xl:grid-cols-[1fr_0.9fr]">
+      <div className="grid gap-5 lg:grid-cols-[1fr_0.9fr]">
         <Card className="glass-card-soft border-0">
           <CardHeader>
             <CardTitle>Launch branded watch room</CardTitle>
@@ -1385,7 +1531,7 @@ function CreatorScreen({
               <Bolt className="mr-2 h-4 w-4" />
               Launch Creator Cup room
             </Button>
-            {status && <p className="rounded-2xl border border-[#22D391]/30 bg-[#22D391]/[0.12] p-3 text-sm font-semibold text-[#8AF2C9]">{status}</p>}
+            {status && <p className="break-all rounded-2xl border border-[#22D391]/30 bg-[#22D391]/[0.12] p-3 text-sm font-semibold text-[#8AF2C9]">{status}</p>}
           </CardContent>
         </Card>
         <Card className="glass-card overflow-hidden border-0">
@@ -1405,10 +1551,10 @@ function CreatorScreen({
               <p className="mt-2 text-lg font-black text-white">Will the next market reaction favor the team pressing higher?</p>
               <p className="mt-3 text-xs text-white/[0.56]">Presented by {config.sponsor}</p>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-[#050915]/70 p-3 font-mono text-xs text-white/[0.62]">
+            <div className="overflow-x-auto break-all rounded-2xl border border-white/10 bg-[#050915]/70 p-3 font-mono text-xs text-white/[0.62]">
               {`<iframe src="https://matchpulse.arena/widget/${config.inviteCode}" width="360" height="640"></iframe>`}
             </div>
-            <div className="grid grid-cols-3 gap-2 text-center text-xs font-bold text-white/70">
+            <div className="grid gap-2 text-center text-xs font-bold text-white/70 sm:grid-cols-3">
               <div className="rounded-2xl bg-white/[0.07] p-3 ring-1 ring-white/10">18.4K fans</div>
               <div className="rounded-2xl bg-white/[0.07] p-3 ring-1 ring-white/10">52K reads</div>
               <div className="rounded-2xl bg-white/[0.07] p-3 ring-1 ring-white/10">42m avg</div>
@@ -1465,11 +1611,11 @@ function AnalyticsScreen({ users, events }: { users: LeaderboardUser[]; events: 
           <CardContent className="space-y-2">
             {events.slice(0, 5).map((event) => (
               <div key={event.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.07] p-3 transition hover:bg-white/[0.105]">
-                <div>
-                  <p className="font-black text-white">{event.title}</p>
+                <div className="min-w-0">
+                  <p className="truncate font-black text-white">{event.title}</p>
                   <p className="text-xs text-white/[0.52]">{event.minute}&apos; / {event.impact} impact</p>
                 </div>
-                <Badge variant={event.impact === "high" ? "live" : "secondary"}>{event.type.replace("_", " ")}</Badge>
+                <Badge className="shrink-0" variant={event.impact === "high" ? "live" : "secondary"}>{event.type.replace("_", " ")}</Badge>
               </div>
             ))}
           </CardContent>
@@ -1521,12 +1667,12 @@ function ReplayScreen({
             <p className="font-black text-white">Demo stream status: {status}</p>
             <p className="mt-1 text-sm text-white/[0.58]">Runs score events, odds sentiment movement, prediction locks, resolution, badge unlocks, and leaderboard updates over SSE.</p>
           </div>
-          <div className="relative flex gap-2">
-            <Button variant="pulse" onClick={onReplay} disabled={isReplaying}>
+          <div className="relative flex flex-col gap-2 min-[420px]:flex-row">
+            <Button className="w-full min-[420px]:w-auto" variant="pulse" onClick={onReplay} disabled={isReplaying}>
               <Play className="mr-2 h-4 w-4" />
               {isReplaying ? "Running" : "Start replay"}
             </Button>
-            <Button variant="outline" onClick={onReset}>
+            <Button className="w-full min-[420px]:w-auto" variant="outline" onClick={onReset}>
               Reset
             </Button>
           </div>
@@ -1608,8 +1754,8 @@ function SectionHeader({ icon: Icon, title, description }: { icon: typeof Activi
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#22D391]/[0.15] ring-1 ring-[#22D391]/25">
           <Icon className="h-5 w-5 text-[#8AF2C9]" />
         </span>
-        <div>
-          <h1 className="text-2xl font-black text-white">{title}</h1>
+        <div className="min-w-0">
+          <h1 className="text-xl font-black text-white sm:text-2xl">{title}</h1>
           <p className="mt-1 text-sm leading-6 text-white/[0.58]">{description}</p>
         </div>
       </div>
@@ -1623,23 +1769,26 @@ function MobileTabs({ current, onChange }: { current: Screen; onChange: (screen:
     { id: "room", label: "Room", icon: Radio },
     { id: "leaderboard", label: "Rank", icon: Crown },
     { id: "passport", label: "Badges", icon: Medal },
-    { id: "creator", label: "Creator", icon: Sparkles }
+    { id: "creator", label: "Creator", icon: Sparkles },
+    { id: "analytics", label: "Stats", icon: BarChart3 },
+    { id: "replay", label: "Replay", icon: ListRestart },
+    { id: "tech", label: "TxLINE", icon: Code2 }
   ];
 
   return (
     <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-[#071026]/90 px-2 pt-2 backdrop-blur-2xl lg:hidden">
-      <div className="grid grid-cols-5 gap-1">
+      <div className="scrollbar-none mx-auto flex max-w-5xl gap-1 overflow-x-auto pb-0.5">
         {items.map((item) => {
           const Icon = item.icon;
           return (
             <button
               key={item.id}
-              className={cn("flex min-h-[48px] flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[11px] font-bold text-white/[0.58] transition hover:bg-white/10 hover:text-white", current === item.id && "bg-white/[0.12] text-[#8AF2C9] ring-1 ring-white/10")}
+              className={cn("flex min-h-[48px] min-w-[64px] flex-1 flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[10px] font-bold leading-none text-white/[0.58] transition hover:bg-white/10 hover:text-white min-[380px]:min-w-[70px] min-[380px]:text-[11px] sm:min-w-[86px] lg:min-w-[96px]", current === item.id && "bg-white/[0.12] text-[#8AF2C9] ring-1 ring-white/10")}
               onClick={() => onChange(item.id)}
               aria-current={current === item.id ? "page" : undefined}
             >
               <Icon className="h-4 w-4" />
-              {item.label}
+              <span className="max-w-full truncate">{item.label}</span>
             </button>
           );
         })}

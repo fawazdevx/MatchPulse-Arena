@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
 }
 
 datasource db {
@@ -28,19 +29,50 @@ enum PredictionKind {
   post_event
 }
 
+enum TxLineNetwork {
+  devnet
+  mainnet
+}
+
+enum TxLineAdapterMode {
+  mock
+  real
+}
+
 model User {
   id            String              @id @default(cuid())
+  walletAddress String              @unique
   name          String
   avatar        String
   points        Int                 @default(0)
   streak        Int                 @default(0)
   bestStreak    Int                 @default(0)
+  joinedRooms   RoomParticipant[]
+  sessions      WalletSession[]
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
   answers       PredictionAnswer[]
-  badgeUnlocks  BadgeUnlock[]
+  badgeUnlocks  UserBadge[]
   roomsCreated  CreatorRoom[]
   leaderboard   LeaderboardEntry[]
+}
+
+model WalletSession {
+  id            String    @id @default(cuid())
+  userId        String
+  walletAddress String
+  nonce         String
+  message       String
+  signature     String?
+  sessionTokenHash String? @unique
+  issuedAt      DateTime  @default(now())
+  expiresAt     DateTime
+  verifiedAt    DateTime?
+  revokedAt     DateTime?
+  user          User      @relation(fields: [userId], references: [id])
+
+  @@index([walletAddress])
+  @@index([expiresAt])
 }
 
 model Match {
@@ -56,14 +88,14 @@ model Match {
   awayName    String
   awayShort   String
   awayColor   String
-  rooms       Room[]
+  rooms       MatchRoom[]
   events      MatchEvent[]
   predictions Prediction[]
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 }
 
-model Room {
+model MatchRoom {
   id          String             @id @default(cuid())
   matchId     String
   name        String
@@ -73,9 +105,24 @@ model Room {
   sponsor     String?
   match       Match              @relation(fields: [matchId], references: [id])
   creatorRoom CreatorRoom?
+  participants RoomParticipant[]
   leaderboard LeaderboardEntry[]
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
+
+  @@map("Room")
+}
+
+model RoomParticipant {
+  id        String   @id @default(cuid())
+  roomId    String
+  userId    String
+  joinedAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  room      MatchRoom @relation(fields: [roomId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([roomId, userId])
 }
 
 model CreatorRoom {
@@ -87,7 +134,7 @@ model CreatorRoom {
   avatar       String
   widgetSlug   String   @unique
   analytics    Json
-  room         Room     @relation(fields: [roomId], references: [id])
+  room         MatchRoom @relation(fields: [roomId], references: [id])
   creator      User     @relation(fields: [creatorId], references: [id])
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -107,6 +154,8 @@ model MatchEvent {
   payload     Json?
   match       Match    @relation(fields: [matchId], references: [id])
   createdAt   DateTime @default(now())
+
+  @@index([matchId, minute])
 }
 
 model Prediction {
@@ -127,8 +176,21 @@ model Prediction {
   sponsorLabel     String?
   match            Match              @relation(fields: [matchId], references: [id])
   answers          PredictionAnswer[]
+  optionRows       PredictionOption[]
+  resolution       PredictionResolution?
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
+}
+
+model PredictionOption {
+  id           String     @id @default(cuid())
+  predictionId String
+  optionId     String
+  label        String
+  team         String?
+  prediction   Prediction @relation(fields: [predictionId], references: [id])
+
+  @@unique([predictionId, optionId])
 }
 
 model PredictionAnswer {
@@ -148,12 +210,33 @@ model PredictionAnswer {
   @@unique([predictionId, userId])
 }
 
-model BadgeUnlock {
+model PredictionResolution {
+  id                 String     @id @default(cuid())
+  predictionId       String     @unique
+  resolvedOptionId   String
+  resolvingEventId   String?
+  txlineUpdateId     String?
+  explanation        String
+  resolvedAt         DateTime   @default(now())
+  sourcePayload      Json?
+  prediction         Prediction @relation(fields: [predictionId], references: [id])
+}
+
+model Badge {
+  id          String      @id
+  name        String
+  description String
+  tone        String
+  unlocks     UserBadge[]
+}
+
+model UserBadge {
   id        String   @id @default(cuid())
   userId    String
   badgeId   String
   reason    String
   user      User     @relation(fields: [userId], references: [id])
+  badge     Badge    @relation(fields: [badgeId], references: [id])
   createdAt DateTime @default(now())
 
   @@unique([userId, badgeId])
@@ -167,9 +250,47 @@ model LeaderboardEntry {
   streak     Int      @default(0)
   bestStreak Int      @default(0)
   rank       Int      @default(0)
-  room       Room     @relation(fields: [roomId], references: [id])
+  room       MatchRoom @relation(fields: [roomId], references: [id])
   user       User     @relation(fields: [userId], references: [id])
   updatedAt  DateTime @updatedAt
 
   @@unique([roomId, userId])
+}
+
+model TxLineEventLog {
+  id             String        @id @default(cuid())
+  matchId        String
+  stream         String
+  endpoint       String
+  txlineUpdateId String?
+  eventType      String
+  occurredAt     DateTime      @default(now())
+  payload        Json
+
+  @@index([matchId, occurredAt])
+}
+
+model TxLineCredential {
+  id             String          @id @default(cuid())
+  network        TxLineNetwork
+  adapter        TxLineAdapterMode
+  walletAddress  String?
+  subscriptionTx String?
+  apiOrigin      String
+  tokenPreview   String?
+  active         Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model ReplaySession {
+  id         String    @id @default(cuid())
+  matchId    String
+  roomId     String?
+  userId     String?
+  status     String    @default("idle")
+  cursor     Int       @default(0)
+  speed      Float     @default(1)
+  startedAt  DateTime  @default(now())
+  completedAt DateTime?
 }
