@@ -1,18 +1,17 @@
 # MatchPulse Arena
 
-MatchPulse Arena is a mobile-first World Cup second-screen fan experience powered by TxLINE-style live match data. Fans join match rooms, watch score and market-sentiment momentum, answer no-money micro-predictions, build Pulse Streaks, unlock badges, and climb room leaderboards.
+MatchPulse Arena is a World Cup second-screen fan dApp powered by TxLINE live match data. Fans connect a Solana wallet, join live match rooms, watch score and market-sentiment momentum, answer no-money micro-predictions, build Pulse Streaks, unlock badges, and compete on room leaderboards.
 
-This is not a betting app. There are no deposits, wagers, payouts, financial rewards, or betting calls to action. Odds movement is translated into fan-facing "momentum", "pressure", and "market reaction" signals for gameplay.
+This is not a betting app. There are no deposits, wagers, payouts, financial rewards, betting slips, or gambling calls to action. Odds movement is translated into fan-facing momentum, pressure, and market reaction signals.
 
 ## Stack
 
-- React + Next.js App Router
-- TypeScript
-- Tailwind CSS
-- shadcn-style UI primitives in `src/components/ui`
-- Node.js API routes for backend endpoints and SSE replay
-- Prisma ORM with Postgres schema
-- Mock TxLINE adapter with replay mode for reliable demos
+- Next.js 14 App Router, React, TypeScript
+- Tailwind CSS and shadcn-style primitives
+- Node.js API routes and SSE streams
+- Prisma ORM and PostgreSQL-ready schema
+- Solana wallet sign-in with Phantom/Solflare
+- TxLINE adapter layer with explicit `mock` and `real` modes
 
 ## Quick Start
 
@@ -25,75 +24,152 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-The app works without Postgres or TxLINE credentials by using the mock replay adapter. To enable database persistence, set `DATABASE_URL` and run:
+For reliable local replay, keep:
+
+```bash
+TXLINE_ADAPTER=mock
+```
+
+For persistence, run Postgres, set `DATABASE_URL`, then:
 
 ```bash
 npm run db:push
 ```
 
-## TxLINE Setup
-
-TxLINE docs used:
-
-- Quickstart: https://txline.txodds.com/documentation/quickstart
-- World Cup Free Tier: https://txline.txodds.com/documentation/worldcup
-- Streaming data: https://txline.txodds.com/documentation/examples/streaming-data
-
-The docs describe World Cup free tiers, guest JWT auth, activated API tokens, fixture data, odds data, score data, historical scores, and SSE streams. Data API requests use:
-
-- `Authorization: Bearer ${TXLINE_GUEST_JWT}`
-- `X-Api-Token: ${TXLINE_API_TOKEN}`
-
-Environment variables:
+Useful verification commands:
 
 ```bash
-TXLINE_API_ORIGIN=https://txline.txodds.com
-TXLINE_GUEST_JWT=
+npm run test:rules
+npm run lint
+npm run build
+```
+
+## Environment
+
+```bash
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/matchpulse_arena?schema=public"
+TXLINE_ADAPTER=mock
+TXLINE_NETWORK=devnet
+TXLINE_API_ORIGIN=https://txline-dev.txodds.com
+TXLINE_PROGRAM_ID=6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J
+TXLINE_TXL_MINT=4Zao8ocPhmMgq7PdsYWyxvqySMGx7xb9cMftPMkEokRG
+SOLANA_RPC_URL=https://api.devnet.solana.com
+TXLINE_JWT=
 TXLINE_API_TOKEN=
 ```
+
+Use `/txline-activate` to activate devnet or mainnet credentials. The page creates the Token-2022 ATA when missing, runs the TxLINE subscription transaction, requests a guest JWT, signs the activation message, and returns the environment variables to paste into `.env.local`.
 
 ## Architecture
 
 TxLINE integration is isolated under `src/services/txline`:
 
+- `index.ts`: explicit adapter selection.
 - `mock-adapter.ts`: replay-safe local data source.
-- `real-adapter.ts`: credential-aware adapter shell for real TxLINE endpoints.
-- `index.ts`: adapter selection.
-- `mock-data.ts`: realistic fixtures, score events, odds sentiment, predictions, and leaderboard seeds.
-- `endpoints.ts`: client-safe technical endpoint metadata.
+- `real-adapter.ts`: server-only TxLINE proxy adapter.
+- `mock-data.ts`: fixtures, event timeline, predictions, leaderboard seeds.
+- `endpoints.ts`: safe technical endpoint metadata.
 
-Backend API routes:
+Backend routes proxy data and never expose TxLINE credentials to the browser:
 
 - `GET /api/txline/fixtures`
 - `GET /api/txline/matches/:matchId/snapshot`
 - `GET /api/txline/matches/:matchId/stream?mode=replay`
+- `POST /api/auth/wallet/nonce`
+- `POST /api/auth/wallet/verify`
+- `GET /api/auth/wallet/session`
+- `POST /api/auth/wallet/logout`
 - `GET /api/game/state`
 - `POST /api/game/answer`
 - `POST /api/creator/rooms`
 
-Prisma models in `prisma/schema.prisma` cover users, matches, rooms, creator rooms, match events, predictions, answers, badges, and leaderboard entries.
+Creator Cup public surfaces:
+
+- `GET /rooms/:inviteCode`
+- `GET /widget/:inviteCode`
+
+## Wallet Auth
+
+The app uses a SIWS-style signed message:
+
+1. Client connects Phantom or Solflare.
+2. Backend creates a nonce and sign-in message.
+3. Wallet signs the message.
+4. Backend verifies the signature with `tweetnacl`.
+5. Backend creates an HTTP-only session cookie.
+6. User state can persist through Prisma/Postgres.
+
+The signed message explicitly states that it does not authorize a transaction, payment, wager, or token transfer.
+
+## Persistence
+
+The Prisma schema includes production dApp records for:
+
+- `User`
+- `WalletSession`
+- `Match`
+- `MatchRoom`
+- `RoomParticipant`
+- `CreatorRoom`
+- `MatchEvent`
+- `Prediction`
+- `PredictionOption`
+- `PredictionAnswer`
+- `PredictionResolution`
+- `Badge`
+- `UserBadge`
+- `LeaderboardEntry`
+- `TxLineEventLog`
+- `TxLineCredential`
+- `ReplaySession`
+
+When `DATABASE_URL` is configured, the app seeds mock World Cup rooms, badges, predictions, event logs, and leaderboard entries, then persists wallet users, answers, streaks, badges, and Creator Cup rooms.
+
+## Live Mode vs Replay Mode
+
+Replay mode:
+
+- Set `TXLINE_ADAPTER=mock`.
+- Uses stored TxLINE-style fixtures, score events, sentiment moves, and prediction resolutions.
+- Works without live credentials.
+
+Live mode:
+
+- Set `TXLINE_ADAPTER=real`.
+- Configure `TXLINE_JWT` and `TXLINE_API_TOKEN`.
+- Backend calls TxLINE server-side.
+- If credentials are missing, API routes return a clear setup state instead of silently falling back to mock data.
+
+## Creator Cup
+
+Creators can connect a wallet and create branded rooms with:
+
+- Creator name, handle, avatar initials, theme color, sponsor label
+- Custom invite code and share URL
+- Embeddable widget HTML
+- Public invite page at `/rooms/:inviteCode`
+- Embeddable match widget at `/widget/:inviteCode`
+- Room Captain badge unlock
+- Analytics-ready room records
 
 ## Demo Flow
 
-1. Land on the match list and choose the featured World Cup room.
-2. Start replay mode to connect to the SSE stream.
-3. Answer the active micro-prediction before it locks.
-4. Watch score events, momentum movement, prediction resolution, streak updates, badge toasts, and leaderboard changes.
-5. Open Creator Cup setup to configure a branded room, sponsor card, invite link, and widget embed.
-6. Open Analytics and TxLINE Notes for the technical/commercial story.
+1. Start in replay mode.
+2. Connect a Solana wallet from the header.
+3. Join the featured World Cup room.
+4. Start replay mode.
+5. Answer a prediction before lock.
+6. Watch score, event, sentiment, badge, and leaderboard updates.
+7. Create a Creator Cup room.
+8. Show `/txline-activate` and the TxLINE notes page.
 
-## Commercial Model
+## Notes
 
-- Free public match rooms for fans.
-- Paid Creator Cup rooms for streamers, football communities, and sports media pages.
-- Sponsored prediction campaigns for brands.
-- White-label live match widgets.
-- Premium creator and publisher analytics.
+If `npm run db:generate` does not write `node_modules/.prisma/client` in your local environment, reinstall dependencies and rerun generation:
 
-## Hackathon Feedback
+```bash
+npm install
+npm run db:generate
+```
 
-What worked well: TxLINE scores and odds streams map cleanly to a second-screen loop where live data becomes fan-friendly momentum, prediction prompts, and resolution evidence.
-
-Friction: exact production fixture identifiers and provider payload normalization should be finalized after live credentials are available.
-
-Next: replace mock mappers with concrete TxLINE payload transforms, run a real Postgres instance, and add authenticated creator room management.
+The app type-checks with a runtime Prisma wrapper so UI/API development is not blocked by a missing generated client, but database persistence requires a generated Prisma Client and a valid `DATABASE_URL`.

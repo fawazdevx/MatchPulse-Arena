@@ -1,7 +1,19 @@
 import { NextResponse } from "next/server";
-import { getTxLineAdapter } from "@/services/txline";
+import { jsonError } from "@/lib/server/http";
+import { getTxLineAdapter, TxLineSetupError } from "@/services/txline";
 
 export async function GET(_request: Request, context: { params: { matchId: string } }) {
-  const snapshot = await getTxLineAdapter().getSnapshot(context.params.matchId);
-  return NextResponse.json(snapshot);
+  try {
+    const snapshot = await getTxLineAdapter().getSnapshot(context.params.matchId);
+    return NextResponse.json(snapshot);
+  } catch (error) {
+    if (error instanceof TxLineSetupError) {
+      return jsonError("TxLINE live mode needs server credentials before snapshots can load.", 503, {
+        missing: error.missing,
+        set: "Use TXLINE_ADAPTER=mock for replay mode or configure TXLINE_JWT and TXLINE_API_TOKEN for live mode."
+      });
+    }
+
+    return jsonError(error instanceof Error ? error.message : "Could not load match snapshot.", 502);
+  }
 }
