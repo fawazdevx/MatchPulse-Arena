@@ -40,7 +40,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { badgeById, badges } from "@/services/game/badges";
-import { leaderboard as seededLeaderboard, predictionDeck } from "@/services/txline/mock-data";
 import { txLineEndpoints } from "@/services/txline/endpoints";
 
 type Screen = "home" | "room" | "leaderboard" | "passport" | "creator" | "analytics" | "replay" | "tech";
@@ -75,6 +74,12 @@ interface CreatorConfig {
   inviteCode: string;
 }
 
+interface SetupState {
+  message: string;
+  missing?: string[];
+  set?: string;
+}
+
 interface AuthUser {
   id: string;
   walletAddress: string;
@@ -105,14 +110,14 @@ declare global {
 }
 
 const defaultFan: FanState = {
-  points: 980,
-  streak: 2,
-  bestStreak: 3,
-  badges: ["kickoff-crew"],
-  correct: 2,
-  answered: 3,
-  oddsCorrect: 1,
-  momentumCorrect: 1,
+  points: 0,
+  streak: 0,
+  bestStreak: 0,
+  badges: [],
+  correct: 0,
+  answered: 0,
+  oddsCorrect: 0,
+  momentumCorrect: 0,
   perfectHalf: false
 };
 
@@ -198,18 +203,52 @@ function nextBadges(fan: FanState, card: PredictionCard, result: ReturnType<type
   return [...earned].filter((badge) => !fan.badges.includes(badge));
 }
 
+function predictionFromTick(tick: ReplayTick, fixture: MatchFixture): PredictionCard {
+  const trend = tick.sentiment.trend;
+  const favored = trend === "away" ? "away" : "home";
+  const lockAt = Math.max(0, tick.event.minute + 1);
+  const resolvesAt = Math.max(lockAt + 1, tick.event.minute + 3);
+
+  return {
+    id: `txline-${tick.event.id}`,
+    kind: tick.event.type === "momentum" ? "momentum" : "next_event",
+    prompt:
+      tick.event.type === "goal" || tick.event.type === "red_card"
+        ? "Which side will the next market reaction favor?"
+        : "Which side is gaining match pulse from this update?",
+    context: `${tick.event.title}: ${tick.event.description}`,
+    options: [
+      { id: "home", label: fixture.home.shortName, team: "home" },
+      { id: "neutral", label: "Balanced pulse" },
+      { id: "away", label: fixture.away.shortName, team: "away" }
+    ],
+    lockAt,
+    resolvesAt,
+    source: {
+      stream: "score",
+      endpoint: "/api/scores/stream",
+      expectedSignal: tick.event.type
+    },
+    resolved: {
+      optionId: trend === "neutral" ? "neutral" : favored,
+      eventId: tick.event.id,
+      explanation: `Resolved by TxLINE update ${tick.event.id}.`
+    }
+  };
+}
+
 function useLocalFan() {
   const [fan, setFan] = useState<FanState>(defaultFan);
 
   useEffect(() => {
-    const raw = window.localStorage.getItem("matchpulse-fan");
+    const raw = window.localStorage.getItem("matchpulse-fan-v2");
     if (raw) {
       setFan(JSON.parse(raw) as FanState);
     }
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem("matchpulse-fan", JSON.stringify(fan));
+    window.localStorage.setItem("matchpulse-fan-v2", JSON.stringify(fan));
   }, [fan]);
 
   return [fan, setFan] as const;
@@ -218,33 +257,36 @@ function useLocalFan() {
 export default function MatchPulseArena() {
   const [screen, setScreen] = useState<Screen>("home");
   const [fixtures, setFixtures] = useState<MatchFixture[]>([]);
-  const [selectedMatchId, setSelectedMatchId] = useState("wc26-esp-aut");
+  const [selectedMatchId, setSelectedMatchId] = useState("");
   const [snapshot, setSnapshot] = useState<MatchSnapshot | null>(null);
   const [events, setEvents] = useState<MatchEvent[]>([]);
   const [score, setScore] = useState({ home: 0, away: 0 });
   const [sentiment, setSentiment] = useState<MatchSnapshot["sentiment"] | null>(null);
   const [clock, setClock] = useState<MatchSnapshot["clock"] | null>(null);
-  const [activePrediction, setActivePrediction] = useState<PredictionCard | null>(predictionDeck[0]);
-  const [predictionState, setPredictionState] = useState<PredictionState>("active");
+  const [activePrediction, setActivePrediction] = useState<PredictionCard | null>(null);
+  const [predictionState, setPredictionState] = useState<PredictionState>("waiting");
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [resolvedPredictions, setResolvedPredictions] = useState<ResolvedPrediction[]>([]);
   const [fan, setFan] = useLocalFan();
-  const [roomLeaderboard, setRoomLeaderboard] = useState<LeaderboardUser[]>(seededLeaderboard);
+  const [roomLeaderboard, setRoomLeaderboard] = useState<LeaderboardUser[]>([]);
   const [toasts, setToasts] = useState<Array<{ id: string; badge: BadgeId }>>([]);
   const [streamStatus, setStreamStatus] = useState<"idle" | "connected" | "complete" | "error">("idle");
   const [isReplaying, setIsReplaying] = useState(false);
+  const [isLoadingFixtures, setIsLoadingFixtures] = useState(true);
+  const [setupState, setSetupState] = useState<SetupState | null>(null);
   const [creatorConfig, setCreatorConfig] = useState<CreatorConfig>({
-    creatorName: "The Final Third",
-    handle: "@finalthirdlive",
-    sponsor: "Pulse Hydration",
-    themeColor: "#C60B1E",
-    inviteCode: "FINALTHIRD-ESPAUT"
+    creatorName: "",
+    handle: "",
+    sponsor: "",
+    themeColor: "#0B7A53",
+    inviteCode: ""
   });
   const [lastTick, setLastTick] = useState<ReplayTick | null>(null);
   const [walletUser, setWalletUser] = useState<AuthUser | null>(null);
   const [walletStatus, setWalletStatus] = useState<"idle" | "connecting" | "connected" | "error">("idle");
   const [walletError, setWalletError] = useState<string | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
+  const liveStartedForRef = useRef<string | null>(null);
 
   const selectedFixture = useMemo(
     () => fixtures.find((fixture) => fixture.id === selectedMatchId) ?? snapshot?.fixture ?? fixtures[0],
@@ -252,35 +294,41 @@ export default function MatchPulseArena() {
   );
 
   const topRank = useMemo(() => {
-    const withYou = roomLeaderboard.map((user) =>
-      user.id === "you"
-        ? {
-            ...user,
-            points: fan.points,
-            streak: fan.streak,
-            bestStreak: fan.bestStreak,
-            badges: fan.badges,
-            trend: "up" as const
-          }
-        : user
-    );
+    const currentUser: LeaderboardUser = {
+      id: walletUser?.id ?? "you",
+      name: walletUser?.name ?? "Guest fan",
+      avatar: walletUser?.avatar ?? "YOU",
+      points: fan.points,
+      streak: fan.streak,
+      bestStreak: fan.bestStreak,
+      badges: fan.badges,
+      trend: fan.points ? "up" : "same"
+    };
+    const withoutCurrent = roomLeaderboard.filter((user) => user.id !== currentUser.id && user.id !== "you");
+    const withYou = [currentUser, ...withoutCurrent];
 
     return withYou.sort((a, b) => b.points - a.points);
-  }, [fan, roomLeaderboard]);
+  }, [fan, roomLeaderboard, walletUser]);
 
   const currentRank = topRank.findIndex((user) => user.id === "you") + 1;
 
   const loadSnapshot = useCallback(async (matchId: string) => {
+    sourceRef.current?.close();
+    sourceRef.current = null;
+    liveStartedForRef.current = null;
     const response = await fetch(`/api/txline/matches/${matchId}/snapshot`, { cache: "no-store" });
-    const data = (await response.json()) as MatchSnapshot;
+    const data = (await response.json()) as MatchSnapshot & { error?: string; missing?: string[]; set?: string };
+    if (!response.ok || data.error) {
+      throw new Error(data.error ?? "Could not load TxLINE snapshot.");
+    }
     setSnapshot(data);
     setSelectedMatchId(matchId);
     setEvents(data.events);
     setScore(data.score);
     setSentiment(data.sentiment);
     setClock(data.clock);
-    setActivePrediction(predictionDeck[0]);
-    setPredictionState("active");
+    setActivePrediction(null);
+    setPredictionState("waiting");
     setSelectedOption(null);
     setStreamStatus("idle");
   }, []);
@@ -290,19 +338,41 @@ export default function MatchPulseArena() {
 
     async function bootstrap() {
       const fixtureResponse = await fetch("/api/txline/fixtures", { cache: "no-store" });
-      const fixtureData = (await fixtureResponse.json()) as { fixtures: MatchFixture[] };
+      const fixtureData = (await fixtureResponse.json()) as { fixtures?: MatchFixture[]; error?: string; missing?: string[]; set?: string };
       if (!alive) return;
 
-      setFixtures(fixtureData.fixtures);
-      await loadSnapshot(fixtureData.fixtures[0]?.id ?? selectedMatchId);
+      if (!fixtureResponse.ok || fixtureData.error) {
+        setFixtures([]);
+        setSetupState({
+          message: fixtureData.error ?? "TxLINE live mode is not configured.",
+          missing: fixtureData.missing,
+          set: fixtureData.set
+        });
+        return;
+      }
+
+      setSetupState(null);
+      setFixtures(fixtureData.fixtures ?? []);
+
+      const firstMatchId = fixtureData.fixtures?.[0]?.id;
+      if (firstMatchId) {
+        await loadSnapshot(firstMatchId);
+      }
     }
 
-    bootstrap().catch(() => setStreamStatus("error"));
+    bootstrap()
+      .catch((error) => {
+        setSetupState({ message: error instanceof Error ? error.message : "Could not load TxLINE fixtures." });
+        setStreamStatus("error");
+      })
+      .finally(() => {
+        if (alive) setIsLoadingFixtures(false);
+      });
 
     return () => {
       alive = false;
     };
-  }, [loadSnapshot, selectedMatchId]);
+  }, [loadSnapshot]);
 
   useEffect(() => {
     fetch("/api/game/state")
@@ -394,6 +464,8 @@ export default function MatchPulseArena() {
 
   const applyTick = useCallback(
     (tick: ReplayTick) => {
+      if (!selectedFixture) return;
+
       setLastTick(tick);
       setEvents((current) => [tick.event, ...current].slice(0, 12));
       setSentiment(tick.sentiment);
@@ -408,31 +480,40 @@ export default function MatchPulseArena() {
         setScore(tick.score);
       }
 
-      if (activePrediction?.resolved?.eventId === tick.event.id) {
-        void resolvePrediction(activePrediction, tick.event);
+      if (activePrediction && selectedOption && predictionState !== "resolved") {
+        const resolvingCard: PredictionCard = {
+          ...activePrediction,
+          resolved: activePrediction.resolved ?? {
+            optionId: tick.sentiment.trend === "neutral" ? "neutral" : tick.sentiment.trend,
+            eventId: tick.event.id,
+            explanation: `Resolved by TxLINE update ${tick.event.id}.`
+          }
+        };
+        void resolvePrediction(resolvingCard, tick.event);
       }
 
-      if (tick.prediction && activePrediction?.id !== tick.prediction.id && tick.prediction.id !== activePrediction?.id) {
+      const nextPrediction = tick.prediction ?? predictionFromTick(tick, selectedFixture);
+      if (nextPrediction.id !== activePrediction?.id) {
         window.setTimeout(() => {
           setActivePrediction((current) => {
-            if (current?.id === tick.prediction?.id) return current;
-            return tick.prediction ?? current;
+            if (current?.id === nextPrediction.id) return current;
+            return nextPrediction;
           });
           setPredictionState("active");
           setSelectedOption(null);
         }, 900);
       }
     },
-    [activePrediction, resolvePrediction]
+    [activePrediction, predictionState, resolvePrediction, selectedFixture, selectedOption]
   );
 
-  const startReplay = useCallback(() => {
+  const startStream = useCallback((mode: "live" | "replay" = "live") => {
     if (!selectedFixture) return;
 
     sourceRef.current?.close();
-    setIsReplaying(true);
+    setIsReplaying(mode === "replay");
     setStreamStatus("connected");
-    const source = new EventSource(`/api/txline/matches/${selectedFixture.id}/stream?mode=replay`);
+    const source = new EventSource(`/api/txline/matches/${selectedFixture.id}/stream?mode=${mode}`);
     sourceRef.current = source;
 
     source.addEventListener("connected", () => setStreamStatus("connected"));
@@ -450,6 +531,17 @@ export default function MatchPulseArena() {
       source.close();
     });
   }, [applyTick, selectedFixture]);
+
+  const startReplay = useCallback(() => startStream("replay"), [startStream]);
+  const startLive = useCallback(() => startStream("live"), [startStream]);
+
+  useEffect(() => {
+    if (!selectedFixture || !snapshot || setupState) return;
+    if (liveStartedForRef.current === selectedFixture.id) return;
+
+    liveStartedForRef.current = selectedFixture.id;
+    startLive();
+  }, [selectedFixture, setupState, snapshot, startLive]);
 
   useEffect(() => {
     return () => sourceRef.current?.close();
@@ -549,13 +641,14 @@ export default function MatchPulseArena() {
     window.setTimeout(() => setPredictionState((state) => (state === "answered" ? "locked" : state)), 1300);
   };
 
-  const resetDemo = async () => {
+  const refreshLiveData = async () => {
     sourceRef.current?.close();
-    setFan(defaultFan);
     setResolvedPredictions([]);
     setToasts([]);
-    setRoomLeaderboard(seededLeaderboard);
-    await loadSnapshot(fixtures[0]?.id ?? "wc26-esp-aut");
+    const matchId = selectedMatchId || fixtures[0]?.id;
+    if (matchId) {
+      await loadSnapshot(matchId);
+    }
     setIsReplaying(false);
   };
 
@@ -573,11 +666,11 @@ export default function MatchPulseArena() {
           <div className="hidden items-center gap-2 md:flex">
             <Badge variant={streamStatus === "connected" ? "live" : "secondary"} className={cn("gap-2", streamStatus === "connected" && "live-dot")}>
               <Radio className="h-3 w-3" />
-              {streamStatus === "connected" ? "Live replay" : "Demo ready"}
+              {streamStatus === "connected" ? "Live stream" : setupState ? "Setup needed" : "Live ready"}
             </Badge>
-            <Button size="sm" variant="outline" onClick={resetDemo}>
+            <Button size="sm" variant="outline" onClick={refreshLiveData}>
               <ListRestart className="mr-2 h-4 w-4" />
-              Reset
+              Refresh
             </Button>
           </div>
           <Button
@@ -592,9 +685,9 @@ export default function MatchPulseArena() {
               {walletUser ? `${walletUser.walletAddress.slice(0, 4)}...${walletUser.walletAddress.slice(-4)}` : walletStatus === "connecting" ? "Signing" : "Wallet"}
             </span>
           </Button>
-          <Button size="sm" variant="pulse" onClick={startReplay}>
+          <Button size="sm" variant="pulse" onClick={startLive} disabled={!selectedFixture}>
             <Play className="mr-2 h-4 w-4" />
-            <span className="max-[340px]:sr-only">Replay</span>
+            <span className="max-[340px]:sr-only">Live</span>
           </Button>
         </div>
       </div>
@@ -609,11 +702,13 @@ export default function MatchPulseArena() {
             <HomeScreen
               fixtures={fixtures}
               selectedMatchId={selectedMatchId}
+              loading={isLoadingFixtures}
+              setupState={setupState}
               onSelect={async (matchId) => {
                 await loadSnapshot(matchId);
                 setScreen("room");
               }}
-              onReplay={startReplay}
+              onLive={startLive}
             />
           )}
 
@@ -631,7 +726,7 @@ export default function MatchPulseArena() {
               fan={fan}
               resolved={resolvedPredictions[0]}
               streamStatus={streamStatus}
-              onReplay={startReplay}
+              onReplay={startLive}
               isReplaying={isReplaying}
               lastTick={lastTick}
             />
@@ -658,7 +753,7 @@ export default function MatchPulseArena() {
               isReplaying={isReplaying}
               status={streamStatus}
               onReplay={startReplay}
-              onReset={resetDemo}
+              onReset={refreshLiveData}
               events={events}
               resolved={resolvedPredictions}
             />
@@ -685,7 +780,7 @@ function NavRail({ current, onChange, rank, streak }: { current: Screen; onChang
     { id: "passport", label: "Passport", icon: Medal },
     { id: "creator", label: "Creator Cup", icon: Sparkles },
     { id: "analytics", label: "Analytics", icon: BarChart3 },
-    { id: "replay", label: "Replay demo", icon: ListRestart },
+    { id: "replay", label: "Replay", icon: ListRestart },
     { id: "tech", label: "TxLINE notes", icon: Code2 }
   ];
 
@@ -697,7 +792,7 @@ function NavRail({ current, onChange, rank, streak }: { current: Screen; onChang
           <div className="mt-4 grid grid-cols-2 gap-2">
             <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
               <p className="text-xs text-white/[0.56]">Room rank</p>
-              <p className="text-2xl font-black">#{rank || 4}</p>
+              <p className="text-2xl font-black">{rank ? `#${rank}` : "Live"}</p>
             </div>
             <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
               <p className="text-xs text-white/[0.56]">Pulse streak</p>
@@ -733,14 +828,20 @@ function NavRail({ current, onChange, rank, streak }: { current: Screen; onChang
 function HomeScreen({
   fixtures,
   selectedMatchId,
+  loading,
+  setupState,
   onSelect,
-  onReplay
+  onLive
 }: {
   fixtures: MatchFixture[];
   selectedMatchId: string;
+  loading: boolean;
+  setupState: SetupState | null;
   onSelect: (matchId: string) => void;
-  onReplay: () => void;
+  onLive: () => void;
 }) {
+  const featuredMatchId = selectedMatchId || fixtures[0]?.id || "";
+
   return (
     <div className="space-y-5">
       <section className="relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(135deg,rgba(18,42,84,0.96),rgba(6,11,24,0.92))] text-white shadow-[0_34px_110px_rgba(0,0,0,0.38)]">
@@ -757,13 +858,13 @@ function HomeScreen({
               Join live watch rooms, answer fast micro-predictions, build a Pulse Streak, and climb creator leaderboards powered by TxLINE match and sentiment updates.
             </p>
             <div className="mt-5 flex flex-wrap gap-2">
-              <Button variant="success" onClick={() => onSelect(selectedMatchId)}>
+              <Button variant="success" onClick={() => featuredMatchId && onSelect(featuredMatchId)} disabled={!featuredMatchId}>
                 <Radio className="mr-2 h-4 w-4" />
                 Join featured room
               </Button>
-              <Button variant="secondary" onClick={onReplay}>
+              <Button variant="secondary" onClick={onLive} disabled={!featuredMatchId}>
                 <Play className="mr-2 h-4 w-4" />
-                Start replay demo
+                Connect live stream
               </Button>
             </div>
           </div>
@@ -788,16 +889,62 @@ function HomeScreen({
         <div className="flex flex-col gap-2 min-[420px]:flex-row min-[420px]:items-end min-[420px]:justify-between">
           <div className="min-w-0">
             <h2 className="text-2xl font-black text-white">Today&apos;s World Cup rooms</h2>
-            <p className="text-sm text-white/[0.55]">July 3, 2026 demo fixtures with replay-ready TxLINE mock streams.</p>
+            <p className="text-sm text-white/[0.55]">Live fixtures loaded through the server-side TxLINE adapter.</p>
           </div>
           <Badge variant="win">Fan-safe</Badge>
         </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          {fixtures.map((fixture) => (
-            <MatchCard key={fixture.id} fixture={fixture} active={fixture.id === selectedMatchId} onSelect={() => onSelect(fixture.id)} />
-          ))}
-        </div>
+        {setupState ? (
+          <TxLineSetupCard setupState={setupState} />
+        ) : loading ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            {[0, 1, 2, 3].map((item) => (
+              <div key={item} className="h-44 animate-pulse rounded-[1.35rem] border border-white/10 bg-white/[0.07]" />
+            ))}
+          </div>
+        ) : fixtures.length ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            {fixtures.map((fixture) => (
+              <MatchCard key={fixture.id} fixture={fixture} active={fixture.id === selectedMatchId} onSelect={() => onSelect(fixture.id)} />
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No live fixtures returned" description="TxLINE responded successfully, but no World Cup fixtures are currently available for this environment." />
+        )}
       </section>
+    </div>
+  );
+}
+
+function TxLineSetupCard({ setupState }: { setupState: SetupState }) {
+  return (
+    <Card className="glass-card-soft border-0">
+      <CardContent className="p-5">
+        <Badge variant="secondary" className="mb-3">Live setup</Badge>
+        <h3 className="text-xl font-black text-white">Connect TxLINE credentials</h3>
+        <p className="mt-2 text-sm leading-6 text-white/[0.58]">{setupState.message}</p>
+        {setupState.missing?.length ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {setupState.missing.map((item) => (
+              <span key={item} className="rounded-full border border-white/10 bg-white/[0.08] px-3 py-1 text-xs font-bold text-white/70">
+                {item}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {setupState.set && <p className="mt-4 rounded-2xl border border-white/10 bg-[#050915]/60 p-3 font-mono text-xs leading-5 text-[#9FC7FF]">{setupState.set}</p>}
+        <Button asChild className="mt-5" variant="success">
+          <a href="/txline-activate">Open TxLINE activation</a>
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function EmptyState({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="rounded-[1.35rem] border border-white/10 bg-white/[0.07] p-5">
+      <p className="font-black text-white">{title}</p>
+      <p className="mt-2 text-sm leading-6 text-white/[0.56]">{description}</p>
     </div>
   );
 }
@@ -944,7 +1091,7 @@ function Scoreboard({
             </div>
             <div className="min-[420px]:text-right">
               <p className="font-mono text-2xl font-black tabular-nums sm:text-3xl">{clock.label}</p>
-              <p className="text-xs font-semibold text-white/[0.52]">{streamStatus === "connected" ? "SSE connected" : "Replay ready"}</p>
+              <p className="text-xs font-semibold text-white/[0.52]">{streamStatus === "connected" ? "SSE connected" : "Awaiting stream"}</p>
             </div>
           </div>
           <div className="mt-6 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 sm:mt-7 sm:gap-3">
@@ -1190,7 +1337,7 @@ function Timeline({ events }: { events: MatchEvent[] }) {
         <CardDescription>Major match events from the score update stream.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {events.map((event) => {
+        {events.length ? events.map((event) => {
           const Icon = eventIcon[event.type] ?? Activity;
           return (
             <div key={event.id} className="float-in flex gap-3 rounded-2xl border border-white/10 bg-white/[0.07] p-3 transition hover:bg-white/[0.105]">
@@ -1206,7 +1353,9 @@ function Timeline({ events }: { events: MatchEvent[] }) {
               </div>
             </div>
           );
-        })}
+        }) : (
+          <p className="rounded-2xl border border-white/10 bg-white/[0.07] p-4 text-sm text-white/[0.56]">Waiting for TxLINE score events from the live stream.</p>
+        )}
       </CardContent>
     </Card>
   );
@@ -1464,7 +1613,7 @@ function PassportScreen({ fan, resolved }: { fan: FanState; resolved: ResolvedPr
               </div>
             ))
           ) : (
-            <p className="rounded-2xl border border-white/10 bg-white/[0.07] p-4 text-sm text-white/[0.56]">Answer a replay prediction to fill this passport.</p>
+            <p className="rounded-2xl border border-white/10 bg-white/[0.07] p-4 text-sm text-white/[0.56]">Answer a live prediction to fill this passport.</p>
           )}
         </CardContent>
       </Card>
@@ -1486,7 +1635,6 @@ function CreatorScreen({
   const [status, setStatus] = useState<string | null>(null);
 
   const launch = async () => {
-    onCaptain();
     const response = await fetch("/api/creator/rooms", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1495,7 +1643,13 @@ function CreatorScreen({
         matchId: fixture?.id
       })
     });
-    const data = (await response.json()) as { inviteUrl: string };
+    const data = (await response.json()) as { inviteUrl?: string; error?: string; message?: string };
+    if (!response.ok || !data.inviteUrl) {
+      setStatus(data.error ?? data.message ?? "Creator Cup room could not be launched yet.");
+      return;
+    }
+
+    onCaptain();
     setStatus(`Room ready: ${data.inviteUrl}`);
   };
 
@@ -1555,9 +1709,9 @@ function CreatorScreen({
               {`<iframe src="https://matchpulse.arena/widget/${config.inviteCode}" width="360" height="640"></iframe>`}
             </div>
             <div className="grid gap-2 text-center text-xs font-bold text-white/70 sm:grid-cols-3">
-              <div className="rounded-2xl bg-white/[0.07] p-3 ring-1 ring-white/10">18.4K fans</div>
-              <div className="rounded-2xl bg-white/[0.07] p-3 ring-1 ring-white/10">52K reads</div>
-              <div className="rounded-2xl bg-white/[0.07] p-3 ring-1 ring-white/10">42m avg</div>
+              <div className="rounded-2xl bg-white/[0.07] p-3 ring-1 ring-white/10">Live TxLINE fixture</div>
+              <div className="rounded-2xl bg-white/[0.07] p-3 ring-1 ring-white/10">Wallet signed room</div>
+              <div className="rounded-2xl bg-white/[0.07] p-3 ring-1 ring-white/10">Embeddable widget</div>
             </div>
           </CardContent>
         </Card>
@@ -1581,15 +1735,19 @@ function CreatorInput({ label, value, onChange }: { label: string; value: string
 
 function AnalyticsScreen({ users, events }: { users: LeaderboardUser[]; events: MatchEvent[] }) {
   const highImpact = events.filter((event) => event.impact === "high").length;
+  const activeFans = users.length;
+  const scoringFans = users.filter((user) => user.points > 0).length;
+  const completionRate = activeFans ? Math.round((scoringFans / activeFans) * 100) : 0;
+  const latestMinute = events[0]?.minute ?? 0;
 
   return (
     <div className="space-y-5">
       <SectionHeader icon={BarChart3} title="Creator analytics" description="Premium reporting for creators, publishers, and sponsored campaigns." />
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric title="Active fans" value="18.4K" helper="+22% since kickoff" />
-        <Metric title="Predictions" value="52.1K" helper="81% completion" />
-        <Metric title="Retention" value="42 min" helper="Average room time" />
-        <Metric title="Pulse moments" value={String(Math.max(highImpact, 3))} helper="Sponsor-ready clips" />
+        <Metric title="Active fans" value={String(activeFans)} helper="Wallet and guest room activity" />
+        <Metric title="Tracked events" value={String(events.length)} helper={`${completionRate}% fans with points`} />
+        <Metric title="Match minute" value={latestMinute ? `${latestMinute}'` : "Live"} helper="Latest TxLINE score event" />
+        <Metric title="Pulse moments" value={String(highImpact)} helper="High-impact TxLINE events" />
       </div>
       <div className="grid gap-5 xl:grid-cols-2">
         <Card className="glass-card-soft border-0">
@@ -1655,7 +1813,7 @@ function ReplayScreen({
 }) {
   return (
     <div className="space-y-5">
-      <SectionHeader icon={ListRestart} title="Replay demo mode" description="Stored TxLINE-style events let judges see the full loop even when no match is live." />
+      <SectionHeader icon={ListRestart} title="TxLINE historical replay" description="Historical TxLINE score events can replay a match flow when a live fixture is not active." />
       <Card className="premium-card relative overflow-hidden border-0">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_82%_0%,rgba(255,209,102,0.18),transparent_22rem)]" />
         <CardContent className="grid gap-4 p-4 sm:grid-cols-[1fr_auto] sm:items-center">
@@ -1664,8 +1822,8 @@ function ReplayScreen({
               <span className={cn("h-3 rounded-full bg-[#22D391] transition-all", isReplaying ? "w-2/3 pulse-track" : "w-1/3")} />
               <span className="h-3 flex-1 rounded-full bg-white/10" />
             </div>
-            <p className="font-black text-white">Demo stream status: {status}</p>
-            <p className="mt-1 text-sm text-white/[0.58]">Runs score events, odds sentiment movement, prediction locks, resolution, badge unlocks, and leaderboard updates over SSE.</p>
+            <p className="font-black text-white">Replay stream status: {status}</p>
+            <p className="mt-1 text-sm text-white/[0.58]">Runs TxLINE historical score events through the same SSE room pipeline used by live updates.</p>
           </div>
           <div className="relative flex flex-col gap-2 min-[420px]:flex-row">
             <Button className="w-full min-[420px]:w-auto" variant="pulse" onClick={onReplay} disabled={isReplaying}>
@@ -1706,7 +1864,7 @@ function ReplayScreen({
 function TechScreen() {
   return (
     <div className="space-y-5">
-      <SectionHeader icon={Code2} title="TxLINE integration notes" description="The app isolates TxLINE calls in a service adapter and exposes demo-safe Node.js API routes." />
+      <SectionHeader icon={Code2} title="TxLINE integration notes" description="The app isolates TxLINE calls in a server-only service adapter and proxies data through Node.js API routes." />
       <Card className="glass-card-soft border-0">
         <CardHeader>
           <CardTitle>Data streams powering MatchPulse</CardTitle>
@@ -1737,8 +1895,8 @@ function TechScreen() {
             className="min-h-[150px] w-full rounded-2xl border border-white/10 bg-[#050915]/[0.72] p-3 text-sm leading-6 text-white outline-none ring-[#2F8CFF]/20 transition focus:border-[#2F8CFF]/50 focus:ring-4"
             defaultValue={[
               "What worked well: TxLINE's scores and odds streams map cleanly to a fan-facing second-screen experience.",
-              "Friction: exact production fixture identifiers and provider payload normalization should be finalized once live credentials are available.",
-              "Next: replace the mock adapter with concrete endpoint mappers and persist room state via Prisma/Postgres."
+              "Friction: exact production fixture identifiers and payload variants should be validated against the final live World Cup feed.",
+              "Next: tune prediction-generation thresholds using real score and sentiment stream volume."
             ].join("\n\n")}
           />
         </CardContent>

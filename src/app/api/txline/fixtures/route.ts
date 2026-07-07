@@ -20,7 +20,7 @@ export async function GET() {
     if (error instanceof TxLineSetupError) {
       return jsonError("TxLINE live mode needs server credentials before fixtures can load.", 503, {
         missing: error.missing,
-        set: "Use TXLINE_ADAPTER=mock for replay mode or configure TXLINE_JWT and TXLINE_API_TOKEN for live mode."
+        set: "Run /txline-activate, then configure TXLINE_JWT and TXLINE_API_TOKEN on the server."
       });
     }
 

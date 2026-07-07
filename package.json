@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "test:rules": "node --experimental-strip-types --test src/services/game/rules.test.ts",
+    "test:smoke": "node scripts/smoke-test.mjs",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",

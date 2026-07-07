@@ -41,7 +41,7 @@ function clean(value: string | undefined) {
 export function getTxLineConfig(): TxLineServerConfig {
   const network = (clean(process.env.TXLINE_NETWORK) ?? "devnet") as TxLineNetwork;
   const defaults = network === "mainnet" ? mainnetDefaults : devnetDefaults;
-  const adapter = (clean(process.env.TXLINE_ADAPTER) ?? "mock") as TxLineAdapterMode;
+  const adapter = (clean(process.env.TXLINE_ADAPTER) ?? "real") as TxLineAdapterMode;
 
   return {
     adapter,
@@ -52,12 +52,12 @@ export function getTxLineConfig(): TxLineServerConfig {
     programId: clean(process.env.TXLINE_PROGRAM_ID) ?? defaults.programId,
     txlTokenMint: clean(process.env.TXLINE_TXL_MINT) ?? defaults.txlTokenMint,
     solanaRpcUrl: clean(process.env.SOLANA_RPC_URL) ?? defaults.solanaRpcUrl,
-    fixturesPath: clean(process.env.TXLINE_FIXTURES_PATH) ?? "/fixtures",
-    scoreSnapshotPath: clean(process.env.TXLINE_SCORE_SNAPSHOT_PATH) ?? "/scores/snapshot?fixtureId={matchId}",
-    oddsSnapshotPath: clean(process.env.TXLINE_ODDS_SNAPSHOT_PATH) ?? "/odds/snapshot?fixtureId={matchId}",
-    scoreStreamPath: clean(process.env.TXLINE_SCORE_STREAM_PATH) ?? "/scores/stream?fixtureId={matchId}",
-    oddsStreamPath: clean(process.env.TXLINE_ODDS_STREAM_PATH) ?? "/odds/stream?fixtureId={matchId}",
-    historicalScoresPath: clean(process.env.TXLINE_HISTORICAL_SCORES_PATH) ?? "/scores/history?fixtureId={matchId}"
+    fixturesPath: clean(process.env.TXLINE_FIXTURES_PATH) ?? "/fixtures/snapshot",
+    scoreSnapshotPath: clean(process.env.TXLINE_SCORE_SNAPSHOT_PATH) ?? "/scores/snapshot/{matchId}",
+    oddsSnapshotPath: clean(process.env.TXLINE_ODDS_SNAPSHOT_PATH) ?? "/odds/snapshot/{matchId}",
+    scoreStreamPath: clean(process.env.TXLINE_SCORE_STREAM_PATH) ?? "/scores/stream",
+    oddsStreamPath: clean(process.env.TXLINE_ODDS_STREAM_PATH) ?? "/odds/stream",
+    historicalScoresPath: clean(process.env.TXLINE_HISTORICAL_SCORES_PATH) ?? "/scores/historical/{matchId}"
   };
 }
 
