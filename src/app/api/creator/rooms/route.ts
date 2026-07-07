@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma, prismaAvailable } from "@/lib/prisma";
 import { getSessionFromRequest } from "@/services/auth/wallet-session";
-import { seedGameData } from "@/services/storage/game-store";
-import { fixtures } from "@/services/txline/mock-data";
+import { seedBadges, upsertMatchFixture } from "@/services/storage/game-store";
+import { getTxLineAdapter, TxLineSetupError } from "@/services/txline";
+import type { MatchFixture } from "@/lib/types";
 
 const db = prisma as any;
 
@@ -33,7 +34,7 @@ export async function POST(request: Request) {
   const sponsor = sanitizeText(payload.sponsor, "brand partner", 48);
   const themeColor = /^#[0-9A-Fa-f]{6}$/.test(String(payload.themeColor ?? "")) ? String(payload.themeColor) : "#0B7A53";
   const inviteCode = inviteFrom(sanitizeText(payload.inviteCode, creatorName, 32));
-  const matchId = sanitizeText(payload.matchId, fixtures[0].id, 64);
+  const requestedMatchId = sanitizeText(payload.matchId, "", 64);
 
   if (!process.env.DATABASE_URL || !prismaAvailable || !session) {
     return NextResponse.json({
@@ -50,27 +51,39 @@ export async function POST(request: Request) {
       message: !session
         ? "Connect and sign with a Solana wallet to persist Creator Cup rooms."
         : !prismaAvailable
-          ? "Prisma Client is not generated. Creator Cup is running in local demo mode."
-        : "DATABASE_URL is not set. Creator Cup is running in local demo mode."
+          ? "Prisma Client is not generated. Run npm run db:generate before persisting Creator Cup rooms."
+        : "DATABASE_URL is not set. Configure Postgres before persisting Creator Cup rooms."
     });
   }
 
   try {
-    await seedGameData();
+    const fixture = await resolveFixture(requestedMatchId);
+    if (!fixture) {
+      return NextResponse.json(
+        {
+          persisted: false,
+          error: "No TxLINE fixture is available for this Creator Cup room. Select a live fixture after TxLINE credentials are configured."
+        },
+        { status: 422 }
+      );
+    }
+
+    await seedBadges();
+    await upsertMatchFixture(fixture);
 
     const room = await db.matchRoom.upsert({
       where: {
         inviteCode
       },
       update: {
-        matchId,
+        matchId: fixture.id,
         name: `${creatorName} Watch Room`,
         mode: "creator",
         themeColor,
         sponsor
       },
       create: {
-        matchId,
+        matchId: fixture.id,
         name: `${creatorName} Watch Room`,
         mode: "creator",
         inviteCode,
@@ -138,6 +151,17 @@ export async function POST(request: Request) {
       analytics: creatorRoom.analytics
     });
   } catch (error) {
+    if (error instanceof TxLineSetupError) {
+      return NextResponse.json(
+        {
+          persisted: false,
+          error: "TxLINE credentials are required before Creator Cup rooms can be persisted.",
+          missing: error.missing
+        },
+        { status: 503 }
+      );
+    }
+
     return NextResponse.json(
       {
         persisted: false,
@@ -146,4 +170,15 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
+}
+
+async function resolveFixture(matchId: string): Promise<MatchFixture | null> {
+  const adapter = getTxLineAdapter();
+  const fixtures = await adapter.getFixtures();
+
+  if (!fixtures.length) {
+    return null;
+  }
+
+  return fixtures.find((fixture) => fixture.id === matchId) ?? fixtures[0] ?? null;
 }

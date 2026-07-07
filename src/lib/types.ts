@@ -165,4 +165,5 @@ export interface TxLineAdapter {
   getFixtures(): Promise<MatchFixture[]>;
   getSnapshot(matchId: string): Promise<MatchSnapshot>;
   getReplayTicks(matchId: string): AsyncGenerator<ReplayTick>;
+  getLiveTicks?(matchId: string): AsyncGenerator<ReplayTick>;
 }

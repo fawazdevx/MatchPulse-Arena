@@ -10,12 +10,13 @@ function encodeEvent(event: string, payload: unknown) {
 
 export async function GET(request: Request, context: { params: { matchId: string } }) {
   const readiness = getTxLineReadiness();
+  const mode = new URL(request.url).searchParams.get("mode") ?? "live";
 
   const stream = new ReadableStream({
     async start(controller) {
       controller.enqueue(
         encodeEvent("connected", {
-          mode: new URL(request.url).searchParams.get("mode") ?? "replay",
+          mode,
           provider: readiness.provider,
           adapter: readiness.adapter,
           network: readiness.network,
@@ -25,7 +26,10 @@ export async function GET(request: Request, context: { params: { matchId: string
       );
 
       try {
-        for await (const tick of getTxLineAdapter().getReplayTicks(context.params.matchId)) {
+        const adapter = getTxLineAdapter();
+        const tickStream = mode === "replay" || !adapter.getLiveTicks ? adapter.getReplayTicks(context.params.matchId) : adapter.getLiveTicks(context.params.matchId);
+
+        for await (const tick of tickStream) {
           controller.enqueue(encodeEvent("tick", tick));
         }
 
@@ -39,7 +43,7 @@ export async function GET(request: Request, context: { params: { matchId: string
           encodeEvent("error", {
             message:
               error instanceof TxLineSetupError
-                ? "TxLINE live mode needs server credentials. Set TXLINE_ADAPTER=mock for replay mode or configure live credentials."
+                ? "TxLINE live mode needs server credentials. Configure TXLINE_JWT and TXLINE_API_TOKEN on the server."
                 : error instanceof Error
                   ? error.message
                   : "Stream failed"

@@ -1,8 +1,7 @@
-import type { BadgeId, LeaderboardUser, MatchEvent, PredictionCard } from "@/lib/types";
+import type { BadgeId, LeaderboardUser, MatchFixture } from "@/lib/types";
 import { prisma, prismaAvailable } from "@/lib/prisma";
 import { badges } from "@/services/game/badges";
 import { getBadgeUnlocks, scorePredictionResult } from "@/services/game/rules";
-import { baseSnapshot, fixtures, leaderboard, predictionDeck, replayTicks } from "@/services/txline/mock-data";
 
 const db = prisma as any;
 
@@ -26,48 +25,24 @@ function roomIdForMatch(matchId: string) {
   return `room-${matchId}`;
 }
 
-function demoWalletFor(id: string) {
-  return `demo-${id}`;
-}
-
-function eventToDb(matchId: string, event: MatchEvent) {
+function matchDataFromFixture(fixture: MatchFixture) {
   return {
-    id: `${matchId}-${event.id}`,
-    matchId,
-    minute: event.minute,
-    stoppage: event.stoppage,
-    type: event.type,
-    team: event.team,
-    title: event.title,
-    description: event.description,
-    impact: event.impact,
-    txlineRef: event.sentimentAfter?.sourceUpdateId,
-    payload: event as unknown as object
+    competition: fixture.competition,
+    stage: fixture.stage,
+    venue: fixture.venue,
+    kickoffIso: new Date(fixture.kickoffIso),
+    phase: fixture.status,
+    homeName: fixture.home.name,
+    homeShort: fixture.home.shortName,
+    homeColor: fixture.home.color,
+    awayName: fixture.away.name,
+    awayShort: fixture.away.shortName,
+    awayColor: fixture.away.color
   };
 }
 
-function predictionToDb(matchId: string, card: PredictionCard) {
-  return {
-    id: card.id,
-    matchId,
-    kind: card.kind,
-    prompt: card.prompt,
-    context: card.context,
-    options: card.options as unknown as object,
-    lockAtMinute: card.lockAt,
-    resolvesAtMinute: card.resolvesAt,
-    status: card.resolved ? "resolved" : "active",
-    resolvedOptionId: card.resolved?.optionId,
-    resolvingEventId: card.resolved?.eventId ? `${matchId}-${card.resolved.eventId}` : undefined,
-    txlineStream: card.source.stream,
-    txlineEndpoint: card.source.endpoint,
-    sponsorName: card.sponsor?.name,
-    sponsorLabel: card.sponsor?.label
-  } as const;
-}
-
-export async function seedGameData() {
-  if (!hasDatabase()) return;
+export async function seedBadges() {
+  if (!hasDatabase()) return false;
 
   for (const badge of badges) {
     await db.badge.upsert({
@@ -86,215 +61,52 @@ export async function seedGameData() {
     });
   }
 
-  for (const fixture of fixtures) {
-    await db.match.upsert({
-      where: { id: fixture.id },
-      update: {
-        competition: fixture.competition,
-        stage: fixture.stage,
-        venue: fixture.venue,
-        kickoffIso: new Date(fixture.kickoffIso),
-        phase: fixture.status,
-        homeName: fixture.home.name,
-        homeShort: fixture.home.shortName,
-        homeColor: fixture.home.color,
-        awayName: fixture.away.name,
-        awayShort: fixture.away.shortName,
-        awayColor: fixture.away.color
-      },
-      create: {
-        id: fixture.id,
-        competition: fixture.competition,
-        stage: fixture.stage,
-        venue: fixture.venue,
-        kickoffIso: new Date(fixture.kickoffIso),
-        phase: fixture.status,
-        homeName: fixture.home.name,
-        homeShort: fixture.home.shortName,
-        homeColor: fixture.home.color,
-        awayName: fixture.away.name,
-        awayShort: fixture.away.shortName,
-        awayColor: fixture.away.color
-      }
-    });
+  return true;
+}
 
-    const roomId = roomIdForMatch(fixture.id);
-    await db.matchRoom.upsert({
-      where: { id: roomId },
-      update: {
-        name: `${fixture.home.shortName} vs ${fixture.away.shortName}`,
-        mode: fixture.creatorRoom ? "creator" : "public",
-        inviteCode: fixture.creatorRoom?.inviteCode ?? `${fixture.home.shortName}-${fixture.away.shortName}`,
-        themeColor: fixture.creatorRoom?.themeColor ?? fixture.home.color,
-        sponsor: fixture.creatorRoom?.sponsor
-      },
-      create: {
-        id: roomId,
-        matchId: fixture.id,
-        name: `${fixture.home.shortName} vs ${fixture.away.shortName}`,
-        mode: fixture.creatorRoom ? "creator" : "public",
-        inviteCode: fixture.creatorRoom?.inviteCode ?? `${fixture.home.shortName}-${fixture.away.shortName}`,
-        themeColor: fixture.creatorRoom?.themeColor ?? fixture.home.color,
-        sponsor: fixture.creatorRoom?.sponsor
-      }
-    });
-
-    if (fixture.creatorRoom) {
-      const creator = await db.user.upsert({
-        where: { walletAddress: demoWalletFor(`creator-${fixture.creatorRoom.inviteCode}`) },
-        update: {
-          name: fixture.creatorRoom.creatorName,
-          avatar: fixture.creatorRoom.avatar
-        },
-        create: {
-          walletAddress: demoWalletFor(`creator-${fixture.creatorRoom.inviteCode}`),
-          name: fixture.creatorRoom.creatorName,
-          avatar: fixture.creatorRoom.avatar
-        }
-      });
-
-      await db.creatorRoom.upsert({
-        where: { roomId },
-        update: {
-          creatorId: creator.id,
-          creatorName: fixture.creatorRoom.creatorName,
-          handle: fixture.creatorRoom.handle,
-          avatar: fixture.creatorRoom.avatar,
-          widgetSlug: fixture.creatorRoom.inviteCode.toLowerCase(),
-          analytics: {}
-        },
-        create: {
-          roomId,
-          creatorId: creator.id,
-          creatorName: fixture.creatorRoom.creatorName,
-          handle: fixture.creatorRoom.handle,
-          avatar: fixture.creatorRoom.avatar,
-          widgetSlug: fixture.creatorRoom.inviteCode.toLowerCase(),
-          analytics: {}
-        }
-      });
-    }
+export async function upsertMatchFixture(fixture: MatchFixture) {
+  if (!hasDatabase()) {
+    return {
+      persisted: false,
+      roomId: roomIdForMatch(fixture.id),
+      reason: "DATABASE_URL is not set or Prisma Client is not generated."
+    };
   }
 
-  for (const user of leaderboard) {
-    const dbUser = await db.user.upsert({
-      where: { walletAddress: demoWalletFor(user.id) },
-      update: {
-        name: user.name,
-        avatar: user.avatar,
-        points: user.points,
-        streak: user.streak,
-        bestStreak: user.bestStreak
-      },
-      create: {
-        id: user.id === "you" ? "you" : undefined,
-        walletAddress: demoWalletFor(user.id),
-        name: user.name,
-        avatar: user.avatar,
-        points: user.points,
-        streak: user.streak,
-        bestStreak: user.bestStreak
-      }
-    });
-
-    for (const badgeId of user.badges) {
-      await db.userBadge.upsert({
-        where: {
-          userId_badgeId: {
-            userId: dbUser.id,
-            badgeId
-          }
-        },
-        update: {},
-        create: {
-          userId: dbUser.id,
-          badgeId,
-          reason: "Seeded room history"
-        }
-      });
+  await db.match.upsert({
+    where: { id: fixture.id },
+    update: matchDataFromFixture(fixture),
+    create: {
+      id: fixture.id,
+      ...matchDataFromFixture(fixture)
     }
+  });
 
-    await db.leaderboardEntry.upsert({
-      where: {
-        roomId_userId: {
-          roomId: roomIdForMatch(fixtures[0].id),
-          userId: dbUser.id
-        }
-      },
-      update: {
-        points: user.points,
-        streak: user.streak,
-        bestStreak: user.bestStreak
-      },
-      create: {
-        roomId: roomIdForMatch(fixtures[0].id),
-        userId: dbUser.id,
-        points: user.points,
-        streak: user.streak,
-        bestStreak: user.bestStreak,
-        rank: 0
-      }
-    });
-  }
-
-  const seedEvents = [...baseSnapshot.events, ...replayTicks.map((tick) => tick.event)];
-  for (const fixture of fixtures) {
-    for (const event of seedEvents) {
-      const dbEvent = eventToDb(fixture.id, event);
-      await db.matchEvent.upsert({
-        where: { id: dbEvent.id },
-        update: dbEvent,
-        create: dbEvent
-      });
+  const roomId = roomIdForMatch(fixture.id);
+  await db.matchRoom.upsert({
+    where: { id: roomId },
+    update: {
+      name: `${fixture.home.shortName} vs ${fixture.away.shortName}`,
+      mode: "public",
+      inviteCode: `${fixture.home.shortName}-${fixture.away.shortName}-${fixture.id}`.replace(/[^A-Za-z0-9-]/g, "").slice(0, 48),
+      themeColor: fixture.home.color,
+      sponsor: null
+    },
+    create: {
+      id: roomId,
+      matchId: fixture.id,
+      name: `${fixture.home.shortName} vs ${fixture.away.shortName}`,
+      mode: "public",
+      inviteCode: `${fixture.home.shortName}-${fixture.away.shortName}-${fixture.id}`.replace(/[^A-Za-z0-9-]/g, "").slice(0, 48),
+      themeColor: fixture.home.color,
+      sponsor: null
     }
-  }
+  });
 
-  for (const card of predictionDeck) {
-    const dbPrediction = predictionToDb(fixtures[0].id, card);
-    await db.prediction.upsert({
-      where: { id: card.id },
-      update: dbPrediction,
-      create: dbPrediction
-    });
-
-    for (const option of card.options) {
-      await db.predictionOption.upsert({
-        where: {
-          predictionId_optionId: {
-            predictionId: card.id,
-            optionId: option.id
-          }
-        },
-        update: {
-          label: option.label,
-          team: option.team
-        },
-        create: {
-          predictionId: card.id,
-          optionId: option.id,
-          label: option.label,
-          team: option.team
-        }
-      });
-    }
-
-    if (card.resolved) {
-      await db.predictionResolution.upsert({
-        where: { predictionId: card.id },
-        update: {
-          resolvedOptionId: card.resolved.optionId,
-          resolvingEventId: `${fixtures[0].id}-${card.resolved.eventId}`,
-          explanation: card.resolved.explanation
-        },
-        create: {
-          predictionId: card.id,
-          resolvedOptionId: card.resolved.optionId,
-          resolvingEventId: `${fixtures[0].id}-${card.resolved.eventId}`,
-          explanation: card.resolved.explanation
-        }
-      });
-    }
-  }
+  return {
+    persisted: true,
+    roomId
+  };
 }
 
 export async function persistAnswer(input: PersistAnswerInput) {
@@ -302,12 +114,12 @@ export async function persistAnswer(input: PersistAnswerInput) {
     return {
       persisted: false,
       serverCalculated: false,
-      reason: "DATABASE_URL not set; using local demo state"
+      reason: "DATABASE_URL is not set or Prisma Client is not generated; answer persistence is disabled."
     };
   }
 
   try {
-    await seedGameData();
+    await seedBadges();
 
     const prediction = await db.prediction.findUnique({
       where: { id: input.predictionId },
@@ -339,9 +151,7 @@ export async function persistAnswer(input: PersistAnswerInput) {
         })
       : null;
 
-    const correct = prediction.resolution
-      ? prediction.resolution.resolvedOptionId === input.optionId
-      : Boolean(input.correct);
+    const correct = prediction.resolution ? prediction.resolution.resolvedOptionId === input.optionId : Boolean(input.correct);
     const nextStreak = correct ? user.streak + 1 : 0;
     const previousCorrect = user.answers.filter((answer: { correct: boolean | null }) => answer.correct).length;
     const pointsAwarded = scorePredictionResult({
@@ -466,13 +276,11 @@ export async function getRoomState() {
   if (!hasDatabase()) {
     return {
       persisted: false,
-      leaderboard
+      leaderboard: [] as LeaderboardUser[]
     };
   }
 
   try {
-    await seedGameData();
-
     const entries = await db.leaderboardEntry.findMany({
       take: 10,
       orderBy: {
@@ -487,7 +295,7 @@ export async function getRoomState() {
       }
     });
 
-    const persistedLeaderboard: LeaderboardUser[] = entries.map((entry: any, index: number) => ({
+    const leaderboard: LeaderboardUser[] = entries.map((entry: any, index: number) => ({
       id: entry.user.id,
       name: entry.user.name,
       avatar: entry.user.avatar,
@@ -500,12 +308,12 @@ export async function getRoomState() {
 
     return {
       persisted: true,
-      leaderboard: persistedLeaderboard.length ? persistedLeaderboard : leaderboard
+      leaderboard
     };
   } catch {
     return {
       persisted: false,
-      leaderboard
+      leaderboard: [] as LeaderboardUser[]
     };
   }
 }

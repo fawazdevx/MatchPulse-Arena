@@ -28,10 +28,10 @@ export const txLineEndpoints = [
     use: "Turns odds movement into fan-facing momentum and prediction resolution."
   },
   {
-    label: "Replay mode",
+    label: "Historical replay",
     method: "SSE",
     path: "/api/txline/matches/:matchId/stream?mode=replay",
     txline: "GET /api/scores/historical/{fixtureId}",
-    use: "Lets judges see the complete product without waiting for a live match."
+    use: "Replays historical TxLINE score events through the same room update pipeline."
   }
 ];
