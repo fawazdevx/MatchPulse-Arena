@@ -91,6 +91,8 @@ export interface MatchSnapshot {
   events: MatchEvent[];
   generatedAt: string;
   provider: "mock-txline" | "txline";
+  dataQuality?: "live" | "delayed";
+  notice?: string;
 }
 
 export interface PredictionOption {
@@ -153,12 +155,16 @@ export interface CreatorRoom {
 export interface ReplayTick {
   atSecond: number;
   event: MatchEvent;
+  dataQuality?: "live" | "delayed";
+  txlineUpdateId?: string;
+  snapshotGeneratedAt?: string;
   score?: {
     home: number;
     away: number;
   };
   sentiment: MarketSentiment;
   prediction?: PredictionCard;
+  resolvedPrediction?: PredictionCard;
 }
 
 export interface TxLineAdapter {

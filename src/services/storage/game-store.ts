@@ -1,4 +1,4 @@
-import type { BadgeId, LeaderboardUser, MatchFixture } from "@/lib/types";
+import type { BadgeId, LeaderboardUser, MatchEvent, MatchFixture, PredictionCard, ReplayTick } from "@/lib/types";
 import { prisma, prismaAvailable } from "@/lib/prisma";
 import { badges } from "@/services/game/badges";
 import { getBadgeUnlocks, scorePredictionResult } from "@/services/game/rules";
@@ -10,11 +10,20 @@ export interface PersistAnswerInput {
   predictionId: string;
   optionId: string;
   answeredAtMs: number;
-  correct?: boolean;
-  pointsAwarded?: number;
   txlineEventId?: string;
-  badgesUnlocked?: BadgeId[];
   roomId?: string;
+  prediction?: PredictionCard;
+  resolvingEvent?: MatchEvent;
+  fan?: {
+    points: number;
+    streak: number;
+    bestStreak: number;
+    badges: BadgeId[];
+    correct: number;
+    answered: number;
+    oddsCorrect: number;
+    momentumCorrect: number;
+  };
 }
 
 function hasDatabase() {
@@ -38,6 +47,47 @@ function matchDataFromFixture(fixture: MatchFixture) {
     awayName: fixture.away.name,
     awayShort: fixture.away.shortName,
     awayColor: fixture.away.color
+  };
+}
+
+function fixtureFromMatchRow(match: any): MatchFixture {
+  return {
+    id: match.id,
+    competition: match.competition,
+    stage: match.stage,
+    venue: match.venue,
+    kickoffIso: match.kickoffIso.toISOString(),
+    status: match.phase,
+    featured: false,
+    home: {
+      id: "home",
+      name: match.homeName,
+      shortName: match.homeShort,
+      color: match.homeColor,
+      crest: match.homeShort,
+      record: "Cached TxLINE"
+    },
+    away: {
+      id: "away",
+      name: match.awayName,
+      shortName: match.awayShort,
+      color: match.awayColor,
+      crest: match.awayShort,
+      record: "Cached TxLINE"
+    }
+  };
+}
+
+function eventFromMatchEventRow(event: any): MatchEvent {
+  return {
+    id: event.id,
+    minute: event.minute,
+    stoppage: event.stoppage ?? undefined,
+    type: event.type,
+    team: event.team ?? undefined,
+    title: event.title,
+    description: event.description,
+    impact: event.impact
   };
 }
 
@@ -109,13 +159,290 @@ export async function upsertMatchFixture(fixture: MatchFixture) {
   };
 }
 
-export async function persistAnswer(input: PersistAnswerInput) {
-  if (!hasDatabase()) {
+export async function getCachedFixturesFromDb() {
+  if (!hasDatabase()) return [] as MatchFixture[];
+
+  try {
+    const matches = await db.match.findMany({
+      take: 30,
+      orderBy: {
+        kickoffIso: "asc"
+      }
+    });
+
+    return matches.map(fixtureFromMatchRow);
+  } catch {
+    return [] as MatchFixture[];
+  }
+}
+
+export async function getCachedSnapshotFromDb(matchId: string, notice: string) {
+  if (!hasDatabase()) return null;
+
+  try {
+    const match = await db.match.findUnique({
+      where: { id: matchId },
+      include: {
+        events: {
+          take: 12,
+          orderBy: {
+            createdAt: "desc"
+          }
+        }
+      }
+    });
+
+    if (!match) return null;
+
+    const latestLog = await db.txLineEventLog.findFirst({
+      where: { matchId },
+      orderBy: {
+        occurredAt: "desc"
+      }
+    });
+    const tick = latestLog?.payload as ReplayTick | undefined;
+    if (!tick?.score || !tick.sentiment) return null;
+
+    const fixture = fixtureFromMatchRow(match);
+    const latestEvent = tick.event ?? match.events[0];
+    const minute = latestEvent?.minute ?? 0;
+    const stoppage = latestEvent?.stoppage ?? 0;
+
+    return {
+      fixture: {
+        ...fixture,
+        status: minute > 0 ? "live" : fixture.status
+      },
+      clock: {
+        minute,
+        stoppage,
+        phase: minute > 0 ? "live" : fixture.status,
+        label: minute ? (stoppage ? `${minute}+${stoppage}'` : `${minute}'`) : fixture.status === "pre" ? "Pre-match" : "Live"
+      },
+      score: tick.score,
+      sentiment: tick.sentiment,
+      events: match.events.map(eventFromMatchEventRow),
+      generatedAt: latestLog?.occurredAt?.toISOString?.() ?? new Date().toISOString(),
+      provider: "txline" as const,
+      dataQuality: "delayed" as const,
+      notice
+    };
+  } catch {
+    return null;
+  }
+}
+
+function dbEventId(matchId: string, eventId?: string) {
+  return `${matchId}-${eventId ?? "snapshot"}`;
+}
+
+function eventToDb(matchId: string, event: MatchEvent) {
+  return {
+    id: dbEventId(matchId, event.id),
+    matchId,
+    minute: event.minute,
+    stoppage: event.stoppage,
+    type: event.type,
+    team: event.team,
+    title: event.title,
+    description: event.description,
+    impact: event.impact,
+    txlineRef: event.sentimentAfter?.sourceUpdateId,
+    payload: event as unknown as object
+  };
+}
+
+async function upsertPrediction(matchId: string, card: PredictionCard) {
+  const resolvingEventId = card.resolved?.eventId ? dbEventId(matchId, card.resolved.eventId) : undefined;
+
+  await db.prediction.upsert({
+    where: { id: card.id },
+    update: {
+      kind: card.kind,
+      prompt: card.prompt,
+      context: card.context,
+      options: card.options as unknown as object,
+      lockAtMinute: card.lockAt,
+      resolvesAtMinute: card.resolvesAt,
+      status: card.resolved ? "resolved" : "active",
+      resolvedOptionId: card.resolved?.optionId,
+      resolvingEventId,
+      txlineStream: card.source.stream,
+      txlineEndpoint: card.source.endpoint,
+      sponsorName: card.sponsor?.name,
+      sponsorLabel: card.sponsor?.label
+    },
+    create: {
+      id: card.id,
+      matchId,
+      kind: card.kind,
+      prompt: card.prompt,
+      context: card.context,
+      options: card.options as unknown as object,
+      lockAtMinute: card.lockAt,
+      resolvesAtMinute: card.resolvesAt,
+      status: card.resolved ? "resolved" : "active",
+      resolvedOptionId: card.resolved?.optionId,
+      resolvingEventId,
+      txlineStream: card.source.stream,
+      txlineEndpoint: card.source.endpoint,
+      sponsorName: card.sponsor?.name,
+      sponsorLabel: card.sponsor?.label
+    }
+  });
+
+  for (const option of card.options) {
+    await db.predictionOption.upsert({
+      where: {
+        predictionId_optionId: {
+          predictionId: card.id,
+          optionId: option.id
+        }
+      },
+      update: {
+        label: option.label,
+        team: option.team
+      },
+      create: {
+        predictionId: card.id,
+        optionId: option.id,
+        label: option.label,
+        team: option.team
+      }
+    });
+  }
+
+  if (card.resolved) {
+    await db.predictionResolution.upsert({
+      where: { predictionId: card.id },
+      update: {
+        resolvedOptionId: card.resolved.optionId,
+        resolvingEventId,
+        txlineUpdateId: card.resolved.eventId,
+        explanation: card.resolved.explanation,
+        sourcePayload: card as unknown as object
+      },
+      create: {
+        predictionId: card.id,
+        resolvedOptionId: card.resolved.optionId,
+        resolvingEventId,
+        txlineUpdateId: card.resolved.eventId,
+        explanation: card.resolved.explanation,
+        sourcePayload: card as unknown as object
+      }
+    });
+  }
+}
+
+export async function persistRoomUpdate(
+  fixture: MatchFixture,
+  tick: ReplayTick,
+  prediction?: PredictionCard,
+  resolvedPrediction?: PredictionCard
+) {
+  if (!hasDatabase()) return { persisted: false };
+
+  await seedBadges();
+  await upsertMatchFixture(fixture);
+
+  const event = eventToDb(fixture.id, tick.event);
+  await db.matchEvent.upsert({
+    where: { id: event.id },
+    update: event,
+    create: event
+  });
+
+  if (resolvedPrediction?.resolved?.eventId && resolvedPrediction.resolved.eventId !== tick.event.id) {
+    const resolvingEvent = eventToDb(fixture.id, {
+      ...tick.event,
+      id: resolvedPrediction.resolved.eventId
+    });
+    await db.matchEvent.upsert({
+      where: { id: resolvingEvent.id },
+      update: resolvingEvent,
+      create: resolvingEvent
+    });
+  }
+
+  await db.txLineEventLog.create({
+    data: {
+      matchId: fixture.id,
+      stream: "score",
+      endpoint: "/api/txline/matches/:matchId/stream?mode=live",
+      txlineUpdateId: tick.txlineUpdateId ?? tick.event.id,
+      eventType: tick.event.type,
+      payload: tick as unknown as object
+    }
+  });
+
+  if (prediction) {
+    await upsertPrediction(fixture.id, prediction);
+  }
+
+  if (resolvedPrediction) {
+    await upsertPrediction(fixture.id, resolvedPrediction);
+  }
+
+  return { persisted: true };
+}
+
+function calculateServerAnswerFallback(input: PersistAnswerInput, reason?: string) {
+  if (!input.prediction?.resolved) {
     return {
       persisted: false,
       serverCalculated: false,
-      reason: "DATABASE_URL is not set or Prisma Client is not generated; answer persistence is disabled."
+      reason: reason ?? "Prediction has not been resolved by a TxLINE update yet."
     };
+  }
+
+  const fan = input.fan ?? {
+    points: 0,
+    streak: 0,
+    bestStreak: 0,
+    badges: [] as BadgeId[],
+    correct: 0,
+    answered: 0,
+    oddsCorrect: 0,
+    momentumCorrect: 0
+  };
+  const correct = input.prediction.resolved.optionId === input.optionId;
+  const nextStreak = correct ? fan.streak + 1 : 0;
+  const pointsAwarded = scorePredictionResult({
+    correct,
+    nextStreak,
+    answeredAtMs: input.answeredAtMs,
+    eventImpact: input.resolvingEvent?.impact,
+    eventMinute: input.resolvingEvent?.minute
+  });
+  const badgesUnlocked = getBadgeUnlocks({
+    currentBadges: fan.badges,
+    correct,
+    previousCorrect: fan.correct,
+    nextStreak,
+    kind: input.prediction.kind,
+    oddsCorrect: fan.oddsCorrect,
+    momentumCorrect: fan.momentumCorrect,
+    event: input.resolvingEvent ? { type: input.resolvingEvent.type, minute: input.resolvingEvent.minute } : undefined
+  });
+
+  return {
+    persisted: false,
+    serverCalculated: true,
+    correct,
+    pointsAwarded,
+    nextStreak,
+    nextPoints: fan.points + pointsAwarded,
+    nextBestStreak: Math.max(fan.bestStreak, nextStreak),
+    badgesUnlocked,
+    txlineEventId: input.prediction.resolved.eventId,
+    explanation: input.prediction.resolved.explanation,
+    reason
+  };
+}
+
+export async function persistAnswer(input: PersistAnswerInput) {
+  if (!hasDatabase()) {
+    return calculateServerAnswerFallback(input, "DATABASE_URL is not set or Prisma Client is not generated; answer was server-calculated but not persisted.");
   }
 
   try {
@@ -130,7 +457,7 @@ export async function persistAnswer(input: PersistAnswerInput) {
     });
 
     if (!prediction) {
-      throw new Error("Prediction was not found on the server.");
+      return calculateServerAnswerFallback(input, "Prediction was not found in Postgres; answer was calculated from the server-issued prediction payload.");
     }
 
     const user = await db.user.findUnique({
@@ -151,7 +478,11 @@ export async function persistAnswer(input: PersistAnswerInput) {
         })
       : null;
 
-    const correct = prediction.resolution ? prediction.resolution.resolvedOptionId === input.optionId : Boolean(input.correct);
+    if (!prediction.resolution) {
+      return calculateServerAnswerFallback(input, "Prediction is not resolved in Postgres yet; answer was calculated from the server-issued prediction payload.");
+    }
+
+    const correct = prediction.resolution.resolvedOptionId === input.optionId;
     const nextStreak = correct ? user.streak + 1 : 0;
     const previousCorrect = user.answers.filter((answer: { correct: boolean | null }) => answer.correct).length;
     const pointsAwarded = scorePredictionResult({
@@ -258,21 +589,19 @@ export async function persistAnswer(input: PersistAnswerInput) {
       serverCalculated: true,
       correct,
       pointsAwarded,
+      nextPoints: user.points + pointsAwarded,
       nextStreak,
+      nextBestStreak: Math.max(user.bestStreak, nextStreak),
       badgesUnlocked,
       txlineEventId: prediction.resolution?.txlineUpdateId ?? input.txlineEventId,
       explanation: prediction.resolution?.explanation
     };
   } catch (error) {
-    return {
-      persisted: false,
-      serverCalculated: false,
-      reason: error instanceof Error ? error.message : "Prisma persistence failed"
-    };
+    return calculateServerAnswerFallback(input, error instanceof Error ? error.message : "Prisma persistence failed");
   }
 }
 
-export async function getRoomState() {
+export async function getRoomState(roomId?: string) {
   if (!hasDatabase()) {
     return {
       persisted: false,
@@ -282,6 +611,11 @@ export async function getRoomState() {
 
   try {
     const entries = await db.leaderboardEntry.findMany({
+      where: roomId
+        ? {
+            roomId
+          }
+        : undefined,
       take: 10,
       orderBy: {
         points: "desc"

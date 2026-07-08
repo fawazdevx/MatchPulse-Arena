@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowRight, Radio, ShieldCheck, Sparkles, Trophy } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { TeamCrest } from "@/components/TeamCrest";
 import { getPublicCreatorRoom } from "@/services/storage/creator-public";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +39,7 @@ export default async function CreatorRoomInvitePage({ params }: { params: { invi
   return (
     <main className="arena-shell min-h-screen px-4 py-6 text-white sm:px-6 lg:px-8">
       <section className="mx-auto grid min-h-[calc(100vh-3rem)] max-w-6xl items-center gap-5 lg:grid-cols-[1.08fr_0.92fr]">
-        <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-[linear-gradient(145deg,rgba(13,23,45,0.96),rgba(7,16,38,0.9))] p-5 shadow-[0_30px_100px_rgba(0,0,0,0.38)] sm:p-8">
+        <div className="relative overflow-hidden rounded-[2rem] border border-white/[0.06] bg-[linear-gradient(145deg,rgba(13,23,45,0.96),rgba(7,16,38,0.9))] p-5 shadow-[0_30px_100px_rgba(0,0,0,0.38)] sm:p-8">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_0%,rgba(47,140,255,0.34),transparent_24rem),radial-gradient(circle_at_88%_14%,rgba(34,211,153,0.18),transparent_22rem)]" />
           <div className="relative">
             <div className="flex flex-wrap items-center gap-2">
@@ -82,8 +83,8 @@ export default async function CreatorRoomInvitePage({ params }: { params: { invi
 
             <div className="mt-8 grid gap-3 sm:grid-cols-3">
               {featureCards.map(({ label, value, Icon }) => (
-                <div key={label} className="rounded-2xl border border-white/10 bg-white/[0.075] p-4">
-                  <Icon className="size-5 text-[#5EE0A4]" />
+                <div key={label} className="rounded-2xl border border-white/[0.06] bg-white/[0.06] p-4">
+                  <Icon className="size-5 text-[#00e676]" />
                   <p className="mt-3 text-sm font-black">{label}</p>
                   <p className="mt-1 text-xs font-semibold text-white/50">{value}</p>
                 </div>
@@ -92,30 +93,26 @@ export default async function CreatorRoomInvitePage({ params }: { params: { invi
           </div>
         </div>
 
-        <div className="rounded-[2rem] border border-white/10 bg-white/[0.075] p-4 shadow-[0_24px_70px_rgba(0,0,0,0.24)] backdrop-blur sm:p-5">
-          <div className="rounded-[1.5rem] border border-white/10 bg-[#071026] p-4">
+        <div className="rounded-[2rem] border border-white/[0.08] bg-white/[0.05] p-4 shadow-[0_26px_80px_rgba(0,0,0,0.4)] backdrop-blur-xl sm:p-5">
+          <div className="rounded-[1.5rem] border border-white/[0.08] bg-[#070d1c] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
             <p className="text-center text-xs font-bold uppercase tracking-[0.16em] text-white/45">{fixture.stage}</p>
             <div className="mt-5 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
               <div className="min-w-0 text-center">
-                <div className="mx-auto grid size-14 place-items-center rounded-2xl text-sm font-black ring-1 ring-white/15" style={{ backgroundColor: fixture.home.color }}>
-                  {fixture.home.crest}
-                </div>
+                <TeamCrest name={fixture.home.name} crest={fixture.home.crest} color={fixture.home.color} className="mx-auto size-14 text-sm" />
                 <p className="mt-2 truncate text-base font-black">{fixture.home.shortName}</p>
               </div>
-              <div className="rounded-2xl bg-white px-4 py-3 text-4xl font-black tabular-nums text-[#071026]">
+              <div className="rounded-2xl bg-white px-4 py-3 text-4xl font-black tabular-nums text-[#04070f]">
                 {scoreLabel}
               </div>
               <div className="min-w-0 text-center">
-                <div className="mx-auto grid size-14 place-items-center rounded-2xl text-sm font-black ring-1 ring-white/15" style={{ backgroundColor: fixture.away.color }}>
-                  {fixture.away.crest}
-                </div>
+                <TeamCrest name={fixture.away.name} crest={fixture.away.crest} color={fixture.away.color} className="mx-auto size-14 text-sm" />
                 <p className="mt-2 truncate text-base font-black">{fixture.away.shortName}</p>
               </div>
             </div>
             <p className="mt-4 text-center text-sm font-semibold text-white/55">{clockLabel} / {fixture.venue}</p>
           </div>
 
-          <div className="mt-4 rounded-[1.5rem] border border-white/10 bg-white/[0.07] p-4">
+          <div className="mt-4 rounded-[1.5rem] border border-white/[0.06] bg-white/[0.06] p-4">
             <div className="mb-3 flex items-center justify-between">
               <p className="text-sm font-black">Top room fans</p>
               <Badge variant="win">Live rank</Badge>
@@ -124,15 +121,15 @@ export default async function CreatorRoomInvitePage({ params }: { params: { invi
               <div className="flex flex-col gap-2">
                 {room.leaderboard.map((fan, index) => (
                   <div key={fan.id} className="flex items-center gap-3 rounded-2xl bg-white/10 p-3">
-                    <span className="grid size-8 place-items-center rounded-xl bg-white text-xs font-black text-[#071026]">{index + 1}</span>
-                    <span className="grid size-9 place-items-center rounded-xl bg-[#2F8CFF]/25 text-xs font-black">{fan.avatar}</span>
+                    <span className="grid size-8 place-items-center rounded-xl bg-white text-xs font-black text-[#040814]">{index + 1}</span>
+                    <span className="grid size-9 place-items-center rounded-xl bg-[#0066ff]/25 text-xs font-black">{fan.avatar}</span>
                     <span className="min-w-0 flex-1 truncate text-sm font-bold">{fan.name}</span>
-                    <span className="text-sm font-black text-[#5EE0A4]">{fan.points}</span>
+                    <span className="text-sm font-black text-[#00e676]">{fan.points}</span>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="rounded-2xl border border-white/10 bg-white/[0.06] p-4 text-sm text-white/58">Leaderboard opens when fans submit persisted predictions.</p>
+              <p className="rounded-2xl border border-white/[0.06] bg-white/[0.06] p-4 text-sm text-white/58">Leaderboard opens when fans submit persisted predictions.</p>
             )}
           </div>
         </div>
@@ -144,7 +141,7 @@ export default async function CreatorRoomInvitePage({ params }: { params: { invi
 function CreatorRoomUnavailable({ inviteCode }: { inviteCode: string }) {
   return (
     <main className="arena-shell grid min-h-screen place-items-center px-4 py-10 text-white">
-      <section className="w-full max-w-xl rounded-[2rem] border border-white/10 bg-white/[0.075] p-6 text-center shadow-[0_24px_70px_rgba(0,0,0,0.28)] backdrop-blur">
+      <section className="w-full max-w-xl rounded-[2rem] border border-white/[0.06] bg-white/[0.06] p-6 text-center shadow-[0_24px_70px_rgba(0,0,0,0.28)] backdrop-blur">
         <Badge variant="creator" className="mb-4">Creator Cup</Badge>
         <h1 className="text-3xl font-black">Room is not live yet</h1>
         <p className="mt-3 text-sm leading-6 text-white/60">
