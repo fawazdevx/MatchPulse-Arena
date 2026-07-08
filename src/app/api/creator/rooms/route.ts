@@ -22,12 +22,13 @@ function inviteFrom(value: string) {
     .slice(0, 24) || "CREATOR-CUP";
 }
 
-function widgetEmbed(inviteCode: string) {
-  return `<iframe src="https://matchpulse.arena/widget/${inviteCode}" width="360" height="640"></iframe>`;
+function widgetEmbed(origin: string, inviteCode: string) {
+  return `<iframe src="${origin}/widget/${inviteCode}" width="360" height="640"></iframe>`;
 }
 
 export async function POST(request: Request) {
   const payload = await request.json();
+  const origin = new URL(request.url).origin;
   const session = await getSessionFromRequest(request).catch(() => null);
   const creatorName = sanitizeText(payload.creatorName, "Creator Cup");
   const handle = sanitizeText(payload.handle, "@creator", 32);
@@ -45,7 +46,8 @@ export async function POST(request: Request) {
       themeColor,
       inviteCode,
       inviteUrl: `/rooms/${inviteCode}`,
-      widgetEmbed: widgetEmbed(inviteCode),
+      widgetUrl: `/widget/${inviteCode}`,
+      widgetEmbed: widgetEmbed(origin, inviteCode),
       persisted: false,
       requiresWallet: !session,
       message: !session
@@ -146,7 +148,8 @@ export async function POST(request: Request) {
       themeColor,
       inviteCode,
       inviteUrl: `/rooms/${inviteCode}`,
-      widgetEmbed: widgetEmbed(inviteCode),
+      widgetUrl: `/widget/${inviteCode}`,
+      widgetEmbed: widgetEmbed(origin, inviteCode),
       persisted: true,
       analytics: creatorRoom.analytics
     });

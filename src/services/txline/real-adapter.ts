@@ -9,27 +9,52 @@ import type {
   TxLineAdapter
 } from "@/lib/types";
 import type { TxLineServerConfig } from "@/lib/server/env";
+import { rememberRuntimeFixtures } from "@/services/txline/runtime-cache";
 
 type JsonRecord = Record<string, unknown>;
 
 const teamColors = ["#0B7A53", "#1F4E9E", "#C03B52", "#8E6A12", "#4B5D8F", "#7A4EAA", "#0E8A9C", "#8F4C32"];
+const fixtureCache = new Map<string, { expiresAt: number; staleUntil: number; promise: Promise<MatchFixture[]> }>();
+const snapshotCache = new Map<string, { expiresAt: number; snapshot: MatchSnapshot }>();
+const fixtureCacheTtlMs = 60_000;
+const staleFixtureCacheTtlMs = 10 * 60_000;
+const snapshotCacheTtlMs = 45_000;
+const defaultTimeoutMs = 4_000;
+const fixtureTimeoutMs = 8_000;
+const snapshotFixtureTimeoutMs = 1_200;
 
 const replaceMatchId = (path: string, matchId: string) => path.replace("{matchId}", encodeURIComponent(matchId));
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function txLineFetch<T>(config: TxLineServerConfig, path: string): Promise<T> {
+async function txLineFetch<T>(config: TxLineServerConfig, path: string, timeoutMs = defaultTimeoutMs): Promise<T> {
   if (!config.jwt || !config.apiToken) {
     throw new Error("Missing TXLINE_JWT or TXLINE_API_TOKEN");
   }
 
-  const response = await fetch(`${config.apiOrigin.replace(/\/$/, "")}/api${path}`, {
-    headers: {
-      Authorization: `Bearer ${config.jwt}`,
-      "X-Api-Token": config.apiToken,
-      Accept: "application/json"
-    },
-    cache: "no-store"
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  let response: Response;
+  try {
+    response = await fetch(`${config.apiOrigin.replace(/\/$/, "")}/api${path}`, {
+      headers: {
+        Authorization: `Bearer ${config.jwt}`,
+        "X-Api-Token": config.apiToken,
+        Accept: "application/json"
+      },
+      cache: "no-store",
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`TxLINE request timed out after ${timeoutMs}ms: ${path}`);
+    }
+
+    const cause = error instanceof Error && "cause" in error ? (error.cause as { code?: string } | undefined) : undefined;
+    throw new Error(`TxLINE network request failed${cause?.code ? ` (${cause.code})` : ""}: ${path}`);
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
@@ -37,6 +62,23 @@ async function txLineFetch<T>(config: TxLineServerConfig, path: string): Promise
   }
 
   return response.json() as Promise<T>;
+}
+
+async function retryTxLineFetch<T>(config: TxLineServerConfig, path: string, timeoutMs: number, attempts = 2): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await txLineFetch<T>(config, path, timeoutMs);
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts - 1) {
+        await sleep(350);
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(`TxLINE request failed: ${path}`);
 }
 
 async function* txLineStream(config: TxLineServerConfig, path: string): AsyncGenerator<unknown> {
@@ -88,35 +130,84 @@ async function* txLineStream(config: TxLineServerConfig, path: string): AsyncGen
 export class RealTxLineAdapter implements TxLineAdapter {
   constructor(private config: TxLineServerConfig) {}
 
-  async getFixtures(): Promise<MatchFixture[]> {
-    const payload = await txLineFetch<unknown>(this.config, this.config.fixturesPath);
-    const records = recordsFromPayload(payload);
+  private fixtureCacheKey() {
+    return `${this.config.apiOrigin}:${this.config.fixturesPath}`;
+  }
 
-    return records
-      .map((record, index) => fixtureFromTxLine(record, index))
-      .filter((fixture): fixture is MatchFixture => Boolean(fixture));
+  async getFixtures(): Promise<MatchFixture[]> {
+    const cacheKey = this.fixtureCacheKey();
+    const cached = fixtureCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && cached.expiresAt > now) {
+      return cached.promise;
+    }
+
+    const staleFixtures = cached && cached.staleUntil > now ? cached.promise.catch(() => [] as MatchFixture[]) : undefined;
+    const promise = retryTxLineFetch<unknown>(this.config, this.config.fixturesPath, fixtureTimeoutMs)
+      .then((payload) => {
+        const records = recordsFromPayload(payload);
+
+        return records
+          .map((record, index) => fixtureFromTxLine(record, index))
+          .filter((fixture): fixture is MatchFixture => Boolean(fixture));
+      })
+      .catch(async (error) => {
+        const fixtures = await staleFixtures;
+        if (fixtures?.length) return fixtures;
+        throw error;
+      });
+
+    fixtureCache.set(cacheKey, {
+      expiresAt: Date.now() + fixtureCacheTtlMs,
+      staleUntil: Date.now() + staleFixtureCacheTtlMs,
+      promise
+    });
+
+    promise
+      .then((fixtures) => {
+        rememberRuntimeFixtures(fixtures);
+        fixtureCache.set(cacheKey, {
+          expiresAt: Date.now() + fixtureCacheTtlMs,
+          staleUntil: Date.now() + staleFixtureCacheTtlMs,
+          promise: Promise.resolve(fixtures)
+        });
+      })
+      .catch(() => undefined);
+    return promise;
   }
 
   async getSnapshot(matchId: string): Promise<MatchSnapshot> {
+    const snapshotCacheKey = this.snapshotCacheKey(matchId);
     const scorePath = replaceMatchId(this.config.scoreSnapshotPath, matchId);
     const oddsPath = replaceMatchId(this.config.oddsSnapshotPath, matchId);
 
     const [scoreResult, oddsResult, fixtureResult] = await Promise.allSettled([
-      txLineFetch<unknown>(this.config, scorePath),
-      txLineFetch<unknown>(this.config, oddsPath),
-      this.getFixtures()
+      retryTxLineFetch<unknown>(this.config, scorePath, defaultTimeoutMs),
+      txLineFetch<unknown>(this.config, oddsPath, 2_500),
+      this.getFixtureFromCacheOrNetwork(snapshotFixtureTimeoutMs)
     ]);
 
-    if (scoreResult.status === "rejected" && oddsResult.status === "rejected") {
+    if (scoreResult.status === "rejected") {
+      const cached = snapshotCache.get(snapshotCacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return {
+          ...cached.snapshot,
+          dataQuality: "delayed",
+          notice: scoreResult.reason instanceof Error ? scoreResult.reason.message : "TxLINE score snapshot is delayed."
+        };
+      }
+
       throw scoreResult.reason instanceof Error ? scoreResult.reason : new Error("TxLINE snapshot unavailable.");
     }
 
-    const scoreRecords = scoreResult.status === "fulfilled" ? recordsFromPayload(scoreResult.value) : [];
+    const scoreRecords = recordsFromPayload(scoreResult.value);
     const oddsRecords = oddsResult.status === "fulfilled" ? recordsFromPayload(oddsResult.value) : [];
     const scoreRecord = latestRecord(scoreRecords, matchId, true);
     const oddsRecord = latestRecord(oddsRecords, matchId, true);
+    const cachedSnapshot = snapshotCache.get(snapshotCacheKey)?.snapshot;
     const fixture =
       (fixtureResult.status === "fulfilled" ? fixtureResult.value.find((item) => item.id === matchId) : undefined) ??
+      cachedSnapshot?.fixture ??
       fixtureFromTxLine(scoreRecord ?? oddsRecord ?? { FixtureId: matchId }, 0);
 
     if (!fixture) {
@@ -132,7 +223,7 @@ export class RealTxLineAdapter implements TxLineAdapter {
       .slice(0, 12)
       .map((record, index) => eventFromScoreRecord(record, fixture, index, sentiment));
 
-    return {
+    const snapshot: MatchSnapshot = {
       fixture: {
         ...fixture,
         status: clock.phase
@@ -142,8 +233,16 @@ export class RealTxLineAdapter implements TxLineAdapter {
       sentiment,
       events,
       provider: "txline",
+      dataQuality: "live",
       generatedAt: new Date().toISOString()
     };
+
+    snapshotCache.set(snapshotCacheKey, {
+      expiresAt: Date.now() + snapshotCacheTtlMs,
+      snapshot
+    });
+
+    return snapshot;
   }
 
   async *getReplayTicks(matchId: string): AsyncGenerator<ReplayTick> {
@@ -176,9 +275,8 @@ export class RealTxLineAdapter implements TxLineAdapter {
   }
 
   async *getLiveTicks(matchId: string): AsyncGenerator<ReplayTick> {
-    const snapshot = await this.getSnapshot(matchId).catch(() => null);
-    const fixture = snapshot?.fixture ?? fixtureFromTxLine({ FixtureId: matchId }, 0);
-    let sentiment = snapshot?.sentiment ?? neutralSentiment();
+    const fixture = (await this.getFixtureFromCacheOrNetwork(snapshotFixtureTimeoutMs).catch(() => [])).find((item) => item.id === matchId) ?? fixtureFromTxLine({ FixtureId: matchId }, 0);
+    let sentiment = neutralSentiment();
     let counter = 0;
 
     if (!fixture) {
@@ -204,9 +302,36 @@ export class RealTxLineAdapter implements TxLineAdapter {
 
   private async getLatestSentiment(matchId: string, fixture: MatchFixture, fallback: MarketSentiment) {
     const oddsPath = replaceMatchId(this.config.oddsSnapshotPath, matchId);
-    const payload = await txLineFetch<unknown>(this.config, oddsPath).catch(() => null);
+    const payload = await txLineFetch<unknown>(this.config, oddsPath, 2_500).catch(() => null);
     const record = payload ? latestRecord(recordsFromPayload(payload), matchId, true) : undefined;
     return extractSentiment(record, fixture, fallback);
+  }
+
+  private snapshotCacheKey(matchId: string) {
+    return `${this.config.apiOrigin}:${this.config.scoreSnapshotPath}:${this.config.oddsSnapshotPath}:${matchId}`;
+  }
+
+  private async getFixtureFromCacheOrNetwork(timeoutMs: number) {
+    const cacheKey = this.fixtureCacheKey();
+    const cached = fixtureCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && cached.expiresAt > now) {
+      return cached.promise;
+    }
+    const staleFixtures = cached && cached.staleUntil > now ? cached.promise.catch(() => [] as MatchFixture[]) : undefined;
+
+    const timeout = new Promise<MatchFixture[]>((resolve) => {
+      setTimeout(() => {
+        if (staleFixtures) {
+          staleFixtures.then(resolve).catch(() => resolve([]));
+          return;
+        }
+
+        resolve([]);
+      }, timeoutMs);
+    });
+
+    return Promise.race([this.getFixtures(), timeout]);
   }
 }
 
@@ -348,8 +473,8 @@ function fixtureFromTxLine(source: JsonRecord | undefined, index: number): Match
   const id = fixtureIdValue(source);
   if (!id) return undefined;
 
-  const participant1 = stringValue(source, ["Participant1", "participant1", "participantOne", "team1", "homeName", "homeTeam", "home"]) ?? "Home team";
-  const participant2 = stringValue(source, ["Participant2", "participant2", "participantTwo", "team2", "awayName", "awayTeam", "away"]) ?? "Away team";
+  const participant1 = stringValue(source, ["Participant1", "participant1", "participantOne", "team1", "homeName", "homeTeam", "home"]) ?? "Home";
+  const participant2 = stringValue(source, ["Participant2", "participant2", "participantTwo", "team2", "awayName", "awayTeam", "away"]) ?? "Away";
   const participant1IsHome = booleanValue(source, ["Participant1IsHome", "participant1IsHome", "participant_1_is_home"]) ?? true;
   const homeName = participant1IsHome ? participant1 : participant2;
   const awayName = participant1IsHome ? participant2 : participant1;
@@ -369,14 +494,29 @@ function fixtureFromTxLine(source: JsonRecord | undefined, index: number): Match
 }
 
 function dateIsoValue(source: JsonRecord | undefined, keys: string[]) {
-  const raw = stringValue(source, keys);
-  if (!raw) return undefined;
-  const date = new Date(raw);
+  if (!source) return undefined;
+
+  let raw: string | number | undefined;
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      raw = value;
+      break;
+    }
+    if (typeof value === "string" && value.trim()) {
+      raw = value.trim();
+      break;
+    }
+  }
+
+  if (raw === undefined) return undefined;
+
+  const date = typeof raw === "number" || /^\d+$/.test(raw) ? new Date(Number(raw)) : new Date(raw);
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
 function phaseValue(source: JsonRecord | undefined, fallback: MatchSnapshot["clock"]["phase"], kickoffIso?: string) {
-  const raw = stringValue(source, ["Status", "status", "Phase", "phase", "MatchPhase", "matchPhase", "State", "state"])?.toLowerCase();
+  const raw = stringValue(source, ["GameState", "gameState", "Status", "status", "Phase", "phase", "MatchPhase", "matchPhase", "State", "state"])?.toLowerCase();
 
   if (raw) {
     if (raw.includes("full") || raw.includes("finish") || raw.includes("closed") || raw.includes("complete")) return "full";
@@ -401,11 +541,14 @@ function teamFromName(name: string, side: TeamKey) {
     shortName,
     color: colorFor(name, side),
     crest: shortName,
-    record: "TxLINE"
+    record: ""
   };
 }
 
 function shortNameFor(name: string) {
+  if (["home", "home team"].includes(name.trim().toLowerCase())) return "Home";
+  if (["away", "away team"].includes(name.trim().toLowerCase())) return "Away";
+
   const parts = name
     .replace(/[^A-Za-z0-9 ]/g, " ")
     .trim()
@@ -451,17 +594,28 @@ function matchesFixture(record: JsonRecord | undefined, matchId: string, allowMi
 
 function extractScore(source: JsonRecord | undefined) {
   const nestedScore = asRecord(source?.Score) ?? asRecord(source?.score) ?? asRecord(source?.CurrentScore) ?? asRecord(source?.currentScore);
+  const participant1 = asRecord(nestedScore?.Participant1) ?? asRecord(nestedScore?.participant1);
+  const participant2 = asRecord(nestedScore?.Participant2) ?? asRecord(nestedScore?.participant2);
+  const participant1Total = asRecord(participant1?.Total) ?? asRecord(participant1?.total);
+  const participant2Total = asRecord(participant2?.Total) ?? asRecord(participant2?.total);
   const arrayScore = numberArrayValue(source, ["Scores", "scores", "CurrentScore", "currentScore"]);
-  const home =
+  const participant1Goals =
     numberValue(source, ["HomeScore", "homeScore", "home_score", "scoreHome", "Participant1Score", "participant1Score", "Team1Score", "team1Score"]) ??
     numberValue(nestedScore, ["home", "Home", "homeScore", "HomeScore", "Participant1Score"]) ??
+    numberValue(participant1Total, ["Goals", "goals"]) ??
+    numberValue(participant1, ["Goals", "goals"]) ??
     arrayScore[0] ??
     0;
-  const away =
+  const participant2Goals =
     numberValue(source, ["AwayScore", "awayScore", "away_score", "scoreAway", "Participant2Score", "participant2Score", "Team2Score", "team2Score"]) ??
     numberValue(nestedScore, ["away", "Away", "awayScore", "AwayScore", "Participant2Score"]) ??
+    numberValue(participant2Total, ["Goals", "goals"]) ??
+    numberValue(participant2, ["Goals", "goals"]) ??
     arrayScore[1] ??
     0;
+  const participant1IsHome = booleanValue(source, ["Participant1IsHome", "participant1IsHome"]) ?? true;
+  const home = participant1IsHome ? participant1Goals : participant2Goals;
+  const away = participant1IsHome ? participant2Goals : participant1Goals;
 
   return {
     home: Math.max(0, Math.round(home)),
@@ -470,12 +624,18 @@ function extractScore(source: JsonRecord | undefined) {
 }
 
 function extractClock(source: JsonRecord | undefined, fallbackPhase: MatchSnapshot["clock"]["phase"]) {
+  const clock = asRecord(source?.Clock) ?? asRecord(source?.clock);
+  const seconds = numberValue(clock, ["Seconds", "seconds"]);
   const minute = Math.max(
     0,
-    Math.round(numberValue(source, ["Minute", "minute", "MatchMinute", "matchMinute", "GameTime", "gameTime", "Elapsed", "elapsed"]) ?? 0)
+    Math.round(
+      numberValue(source, ["Minute", "minute", "MatchMinute", "matchMinute", "GameTime", "gameTime", "Elapsed", "elapsed"]) ?? (seconds ? seconds / 60 : 0)
+    )
   );
   const stoppage = Math.max(0, Math.round(numberValue(source, ["Stoppage", "stoppage", "AddedTime", "addedTime", "ExtraMinute", "extraMinute"]) ?? 0));
-  const phase = phaseValue(source, fallbackPhase);
+  const running = booleanValue(clock, ["Running", "running"]);
+  const basePhase = phaseValue(source, fallbackPhase);
+  const phase = seconds && seconds > 0 && basePhase === "pre" ? (running === false ? "full" : "live") : basePhase;
 
   return {
     minute,

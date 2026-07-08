@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Activity, Radio, Trophy } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { TeamCrest } from "@/components/TeamCrest";
 import { getPublicCreatorRoom } from "@/services/storage/creator-public";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +20,7 @@ export default async function MatchPulseWidgetPage({ params }: { params: { invit
 
   if (!room) {
     return (
-      <main className="grid min-h-screen place-items-center bg-[#050915] p-3 text-white">
+      <main className="grid min-h-screen place-items-center bg-[#04070f] p-3 text-white">
         <section className="w-full max-w-sm rounded-[1.5rem] border border-white/10 bg-white/[0.08] p-5 text-center">
           <Badge variant="creator">MatchPulse Arena</Badge>
           <h1 className="mt-4 text-xl font-black">Widget is not live yet</h1>
@@ -43,7 +44,7 @@ export default async function MatchPulseWidgetPage({ params }: { params: { invit
   const clockLabel = snapshot ? snapshot.clock.label : "Awaiting live snapshot";
 
   return (
-    <main className="min-h-screen bg-[#050915] p-3 text-white">
+    <main className="min-h-screen bg-[#04070f] p-3 text-white">
       <section className="mx-auto flex min-h-[calc(100vh-1.5rem)] max-w-sm flex-col overflow-hidden rounded-[1.5rem] border border-white/10 bg-[linear-gradient(145deg,rgba(13,23,45,0.96),rgba(8,17,38,0.92))] shadow-[0_24px_70px_rgba(0,0,0,0.42)]">
         <div className="relative overflow-hidden p-4">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_0%,rgba(47,140,255,0.28),transparent_14rem),radial-gradient(circle_at_85%_12%,rgba(34,211,153,0.18),transparent_12rem)]" />
@@ -66,18 +67,14 @@ export default async function MatchPulseWidgetPage({ params }: { params: { invit
             <p className="text-center text-xs font-bold uppercase tracking-[0.16em] text-white/45">{fixture.stage}</p>
             <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
               <div className="min-w-0 text-center">
-                <div className="mx-auto grid size-12 place-items-center rounded-2xl text-sm font-black ring-1 ring-white/15" style={{ backgroundColor: fixture.home.color }}>
-                  {fixture.home.crest}
-                </div>
+                <TeamCrest name={fixture.home.name} crest={fixture.home.crest} color={fixture.home.color} className="mx-auto size-12 text-sm" />
                 <p className="mt-2 truncate text-sm font-black">{fixture.home.shortName}</p>
               </div>
               <div className="rounded-2xl bg-white px-3 py-2 text-3xl font-black tabular-nums text-[#071026]">
                 {scoreLabel}
               </div>
               <div className="min-w-0 text-center">
-                <div className="mx-auto grid size-12 place-items-center rounded-2xl text-sm font-black ring-1 ring-white/15" style={{ backgroundColor: fixture.away.color }}>
-                  {fixture.away.crest}
-                </div>
+                <TeamCrest name={fixture.away.name} crest={fixture.away.crest} color={fixture.away.color} className="mx-auto size-12 text-sm" />
                 <p className="mt-2 truncate text-sm font-black">{fixture.away.shortName}</p>
               </div>
             </div>
