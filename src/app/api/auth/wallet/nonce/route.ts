@@ -13,7 +13,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      ...(await createWalletNonce(walletAddress))
+      ...(await createWalletNonce(walletAddress, new URL(request.url).origin))
     });
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : "Could not create wallet sign-in message.", 400);

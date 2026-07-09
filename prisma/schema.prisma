@@ -5,6 +5,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 enum MatchPhase {
@@ -58,7 +59,7 @@ model User {
 
 model WalletSession {
   id            String    @id @default(cuid())
-  userId        String
+  userId        String?
   walletAddress String
   nonce         String
   message       String
@@ -68,7 +69,7 @@ model WalletSession {
   expiresAt     DateTime
   verifiedAt    DateTime?
   revokedAt     DateTime?
-  user          User      @relation(fields: [userId], references: [id])
+  user          User?     @relation(fields: [userId], references: [id])
 
   @@index([walletAddress])
   @@index([expiresAt])

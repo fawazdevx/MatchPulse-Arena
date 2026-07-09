@@ -442,7 +442,7 @@ function calculateServerAnswerFallback(input: PersistAnswerInput, reason?: strin
 
 export async function persistAnswer(input: PersistAnswerInput) {
   if (!hasDatabase()) {
-    return calculateServerAnswerFallback(input, "DATABASE_URL is not set or Prisma Client is not generated; answer was server-calculated but not persisted.");
+    throw new Error("DATABASE_URL is not set or Prisma Client is not generated; authenticated answers cannot be persisted.");
   }
 
   try {
@@ -597,7 +597,7 @@ export async function persistAnswer(input: PersistAnswerInput) {
       explanation: prediction.resolution?.explanation
     };
   } catch (error) {
-    return calculateServerAnswerFallback(input, error instanceof Error ? error.message : "Prisma persistence failed");
+    throw new Error(error instanceof Error ? error.message : "Prisma persistence failed");
   }
 }
 

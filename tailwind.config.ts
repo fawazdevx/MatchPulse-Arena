@@ -42,7 +42,7 @@ const config: Config = {
         accent: {
           DEFAULT: "hsl(var(--accent))",
           foreground: "hsl(var(--accent-foreground))",
-          live: "#00e676",
+          live: "#22D391",
           pulse: "#ff3b30",
           reward: "#ffcc00"
         },
@@ -55,9 +55,9 @@ const config: Config = {
           foreground: "hsl(var(--card-foreground))"
         },
         surface: {
-          DEFAULT: "#0b1220",
-          muted: "#121b2e",
-          elevated: "#1a2540"
+          DEFAULT: "#071112",
+          muted: "#0d1b1a",
+          elevated: "#142622"
         }
       },
       backgroundImage: {

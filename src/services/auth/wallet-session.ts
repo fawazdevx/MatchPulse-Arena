@@ -1,8 +1,7 @@
 import crypto from "crypto";
 import nacl from "tweetnacl";
 import { PublicKey } from "@solana/web3.js";
-import { prisma, prismaAvailable } from "@/lib/prisma";
-import { parseCookie } from "@/lib/server/http";
+import { prisma, prismaAvailable } from "../../lib/prisma.ts";
 
 export const SESSION_COOKIE = "matchpulse_session";
 const db = prisma as any;
@@ -25,6 +24,16 @@ function createSessionToken() {
   return crypto.randomBytes(32).toString("base64url");
 }
 
+function parseCookie(header: string | null, name: string) {
+  if (!header) return undefined;
+
+  return header
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${name}=`))
+    ?.slice(name.length + 1);
+}
+
 function avatarFromWallet(walletAddress: string) {
   return walletAddress.slice(0, 2).toUpperCase();
 }
@@ -33,48 +42,63 @@ function nameFromWallet(walletAddress: string) {
   return `Fan ${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`;
 }
 
-export function buildSignInMessage(walletAddress: string, nonce: string, issuedAt = new Date()) {
+function normalizeOrigin(origin: string) {
+  return new URL(origin).origin;
+}
+
+function userDataFromWallet(walletAddress: string) {
+  return {
+    walletAddress,
+    name: nameFromWallet(walletAddress),
+    avatar: avatarFromWallet(walletAddress)
+  };
+}
+
+function memoryUserFromWallet(walletAddress: string) {
+  return {
+    id: `wallet-${walletAddress}`,
+    ...userDataFromWallet(walletAddress),
+    points: 0,
+    streak: 0,
+    bestStreak: 0,
+    badgeUnlocks: []
+  };
+}
+
+export function buildSignInMessage(walletAddress: string, nonce: string, origin: string, issuedAt = new Date()) {
+  const normalizedOrigin = normalizeOrigin(origin);
   return [
     "MatchPulse Arena wants you to sign in with your Solana wallet.",
     "",
     "This signature proves wallet ownership. It does not authorize a transaction, payment, wager, or token transfer.",
     "",
+    `Domain: ${new URL(normalizedOrigin).host}`,
+    `URI: ${normalizedOrigin}`,
+    "Version: 1",
+    "Chain ID: solana:mainnet",
     `Wallet: ${walletAddress}`,
     `Nonce: ${nonce}`,
     `Issued At: ${issuedAt.toISOString()}`
   ].join("\n");
 }
 
-export async function createWalletNonce(walletAddress: string) {
+export async function createWalletNonce(walletAddress: string, origin: string) {
   const normalizedWallet = new PublicKey(walletAddress).toBase58();
   const nonce = crypto.randomBytes(16).toString("hex");
   const issuedAt = new Date();
-  const message = buildSignInMessage(normalizedWallet, nonce, issuedAt);
+  const message = buildSignInMessage(normalizedWallet, nonce, origin, issuedAt);
 
   if (!process.env.DATABASE_URL || !prismaAvailable) {
-    const user =
-      memoryUsers.get(normalizedWallet) ??
-      {
-        id: `wallet-${normalizedWallet}`,
-        walletAddress: normalizedWallet,
-        name: nameFromWallet(normalizedWallet),
-        avatar: avatarFromWallet(normalizedWallet),
-        points: 0,
-        streak: 0,
-        bestStreak: 0,
-        badgeUnlocks: []
-      };
     const session = {
       id: crypto.randomBytes(12).toString("hex"),
-      userId: user.id,
+      userId: undefined,
       walletAddress: normalizedWallet,
       nonce,
       message,
       expiresAt: nowPlus(NONCE_TTL_MS),
-      user
+      user: undefined
     };
 
-    memoryUsers.set(normalizedWallet, user);
     memorySessions.set(session.id, session);
 
     return {
@@ -85,21 +109,8 @@ export async function createWalletNonce(walletAddress: string) {
     };
   }
 
-  const user = await db.user.upsert({
-    where: {
-      walletAddress: normalizedWallet
-    },
-    update: {},
-    create: {
-      walletAddress: normalizedWallet,
-      name: nameFromWallet(normalizedWallet),
-      avatar: avatarFromWallet(normalizedWallet)
-    }
-  });
-
   const session = await db.walletSession.create({
     data: {
-      userId: user.id,
       walletAddress: normalizedWallet,
       nonce,
       message,
@@ -123,8 +134,16 @@ export async function verifyWalletSignature(input: {
   const normalizedWallet = new PublicKey(input.walletAddress).toBase58();
   if (!process.env.DATABASE_URL || !prismaAvailable) {
     const session = memorySessions.get(input.sessionId);
-    if (!session || session.walletAddress !== normalizedWallet || session.expiresAt.getTime() < Date.now()) {
+    if (!session || session.walletAddress !== normalizedWallet || session.revokedAt) {
       throw new Error("Wallet session was not found.");
+    }
+
+    if (session.verifiedAt) {
+      throw new Error("Sign-in message has already been used. Request a new wallet sign-in.");
+    }
+
+    if (session.expiresAt.getTime() < Date.now()) {
+      throw new Error("Sign-in message expired. Request a new wallet sign-in.");
     }
 
     const publicKey = new PublicKey(normalizedWallet);
@@ -140,7 +159,11 @@ export async function verifyWalletSignature(input: {
     }
 
     const sessionToken = createSessionToken();
+    const user = memoryUsers.get(normalizedWallet) ?? memoryUserFromWallet(normalizedWallet);
+    memoryUsers.set(normalizedWallet, user);
     session.signature = input.signature;
+    session.userId = user.id;
+    session.user = user;
     session.verifiedAt = new Date();
     session.expiresAt = nowPlus(SESSION_TTL_MS);
     memoryTokens.set(hashToken(sessionToken), session.id);
@@ -164,6 +187,10 @@ export async function verifyWalletSignature(input: {
     throw new Error("Wallet session was not found.");
   }
 
+  if (session.verifiedAt) {
+    throw new Error("Sign-in message has already been used. Request a new wallet sign-in.");
+  }
+
   if (session.expiresAt.getTime() < Date.now()) {
     throw new Error("Sign-in message expired. Request a new wallet sign-in.");
   }
@@ -181,11 +208,20 @@ export async function verifyWalletSignature(input: {
   }
 
   const sessionToken = createSessionToken();
+  const user = await db.user.upsert({
+    where: {
+      walletAddress: normalizedWallet
+    },
+    update: {},
+    create: userDataFromWallet(normalizedWallet)
+  });
+
   const verifiedSession = await db.walletSession.update({
     where: {
       id: session.id
     },
     data: {
+      userId: user.id,
       signature: input.signature,
       sessionTokenHash: hashToken(sessionToken),
       verifiedAt: new Date(),
@@ -213,7 +249,7 @@ export async function getSessionFromRequest(request: Request) {
   if (!process.env.DATABASE_URL || !prismaAvailable) {
     const sessionId = memoryTokens.get(hashToken(sessionToken));
     const session = sessionId ? memorySessions.get(sessionId) : null;
-    if (!session || !session.verifiedAt || session.expiresAt.getTime() < Date.now()) {
+    if (!session || !session.verifiedAt || !session.user || session.expiresAt.getTime() < Date.now()) {
       return null;
     }
 
@@ -233,7 +269,7 @@ export async function getSessionFromRequest(request: Request) {
     }
   });
 
-  if (!session || !session.verifiedAt || session.revokedAt || session.expiresAt.getTime() < Date.now()) {
+  if (!session || !session.verifiedAt || session.revokedAt || !session.user || session.expiresAt.getTime() < Date.now()) {
     return null;
   }
 

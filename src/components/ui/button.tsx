@@ -8,12 +8,12 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-[linear-gradient(135deg,#00b862,#00e676)] text-[#04070f] [box-shadow:inset_0_1px_0_rgba(255,255,255,0.28),0_14px_40px_-12px_rgba(0,230,118,0.5)] motion-safe:hover:-translate-y-0.5 hover:brightness-110",
+        default: "bg-[linear-gradient(135deg,#16A86F,#22D391)] text-[#03110C] [box-shadow:inset_0_1px_0_rgba(255,255,255,0.28),0_14px_40px_-12px_rgba(34,211,145,0.48)] motion-safe:hover:-translate-y-0.5 hover:brightness-110",
         secondary: "border border-white/[0.08] bg-surface-muted text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] hover:border-white/[0.14] hover:bg-surface-elevated",
         outline: "border border-white/[0.1] bg-surface/60 text-white hover:border-white/[0.2] hover:bg-surface-muted",
         ghost: "text-white/[0.78] hover:bg-surface-muted hover:text-white",
-        pulse: "bg-[linear-gradient(135deg,#14203f,#243769)] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_16px_42px_rgba(0,0,0,0.34)] motion-safe:hover:-translate-y-0.5 hover:brightness-110",
-        success: "bg-[linear-gradient(135deg,#00c853,#00e676)] text-[#04120E] [box-shadow:inset_0_1px_0_rgba(255,255,255,0.32),0_14px_36px_-12px_rgba(0,230,118,0.55)] motion-safe:hover:-translate-y-0.5 hover:brightness-110"
+        pulse: "bg-[linear-gradient(135deg,#10231E,#1D3F35)] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_16px_42px_rgba(0,0,0,0.34)] motion-safe:hover:-translate-y-0.5 hover:brightness-110",
+        success: "bg-[linear-gradient(135deg,#22D391,#FFD166)] text-[#03110C] [box-shadow:inset_0_1px_0_rgba(255,255,255,0.32),0_14px_36px_-12px_rgba(34,211,145,0.5)] motion-safe:hover:-translate-y-0.5 hover:brightness-110"
       },
       size: {
         default: "h-11 px-5 py-2",
