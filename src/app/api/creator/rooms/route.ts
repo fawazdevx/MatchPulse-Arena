@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma, prismaAvailable } from "@/lib/prisma";
+import { jsonError } from "@/lib/server/http";
 import { getSessionFromRequest } from "@/services/auth/wallet-session";
 import { seedBadges, upsertMatchFixture } from "@/services/storage/game-store";
 import { getTxLineAdapter, TxLineSetupError } from "@/services/txline";
@@ -37,25 +38,17 @@ export async function POST(request: Request) {
   const inviteCode = inviteFrom(sanitizeText(payload.inviteCode, creatorName, 32));
   const requestedMatchId = sanitizeText(payload.matchId, "", 64);
 
-  if (!process.env.DATABASE_URL || !prismaAvailable || !session) {
-    return NextResponse.json({
-      id: `creator-${Date.now()}`,
-      creatorName,
-      handle,
-      sponsor,
-      themeColor,
-      inviteCode,
-      inviteUrl: `/rooms/${inviteCode}`,
-      widgetUrl: `/widget/${inviteCode}`,
-      widgetEmbed: widgetEmbed(origin, inviteCode),
-      persisted: false,
-      requiresWallet: !session,
-      message: !session
-        ? "Connect and sign with a Solana wallet to persist Creator Cup rooms."
-        : !prismaAvailable
-          ? "Prisma Client is not generated. Run npm run db:generate before persisting Creator Cup rooms."
-        : "DATABASE_URL is not set. Configure Postgres before persisting Creator Cup rooms."
-    });
+  if (!session) {
+    return jsonError("Connect and sign with a Solana wallet to create Creator Cup rooms.", 401);
+  }
+
+  if (!process.env.DATABASE_URL || !prismaAvailable) {
+    return jsonError(
+      !prismaAvailable
+        ? "Prisma Client is not generated. Run npm run db:generate before persisting Creator Cup rooms."
+        : "DATABASE_URL is not set. Configure Postgres before persisting Creator Cup rooms.",
+      503
+    );
   }
 
   try {

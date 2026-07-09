@@ -39,8 +39,8 @@ export default async function CreatorRoomInvitePage({ params }: { params: { invi
   return (
     <main className="arena-shell min-h-screen px-4 py-6 text-white sm:px-6 lg:px-8">
       <section className="mx-auto grid min-h-[calc(100vh-3rem)] max-w-6xl items-center gap-5 lg:grid-cols-[1.08fr_0.92fr]">
-        <div className="relative overflow-hidden rounded-[2rem] border border-white/[0.06] bg-[linear-gradient(145deg,rgba(13,23,45,0.96),rgba(7,16,38,0.9))] p-5 shadow-[0_30px_100px_rgba(0,0,0,0.38)] sm:p-8">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_0%,rgba(47,140,255,0.34),transparent_24rem),radial-gradient(circle_at_88%_14%,rgba(34,211,153,0.18),transparent_22rem)]" />
+        <div className="relative overflow-hidden rounded-[2rem] border border-white/[0.06] bg-[linear-gradient(145deg,rgba(8,18,18,0.96),rgba(4,10,14,0.92))] p-5 shadow-[0_30px_100px_rgba(0,0,0,0.38)] sm:p-8">
+          <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(180deg,rgba(34,211,145,0.1),transparent_42%)] bg-[length:72px_72px,auto]" />
           <div className="relative">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="creator" className="gap-2">
@@ -84,7 +84,7 @@ export default async function CreatorRoomInvitePage({ params }: { params: { invi
             <div className="mt-8 grid gap-3 sm:grid-cols-3">
               {featureCards.map(({ label, value, Icon }) => (
                 <div key={label} className="rounded-2xl border border-white/[0.06] bg-white/[0.06] p-4">
-                  <Icon className="size-5 text-[#00e676]" />
+                  <Icon className="size-5 text-[#22D391]" />
                   <p className="mt-3 text-sm font-black">{label}</p>
                   <p className="mt-1 text-xs font-semibold text-white/50">{value}</p>
                 </div>
@@ -94,14 +94,14 @@ export default async function CreatorRoomInvitePage({ params }: { params: { invi
         </div>
 
         <div className="rounded-[2rem] border border-white/[0.08] bg-white/[0.05] p-4 shadow-[0_26px_80px_rgba(0,0,0,0.4)] backdrop-blur-xl sm:p-5">
-          <div className="rounded-[1.5rem] border border-white/[0.08] bg-[#070d1c] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+          <div className="rounded-[1.5rem] border border-white/[0.08] bg-[#071112] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
             <p className="text-center text-xs font-bold uppercase tracking-[0.16em] text-white/45">{fixture.stage}</p>
             <div className="mt-5 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
               <div className="min-w-0 text-center">
                 <TeamCrest name={fixture.home.name} crest={fixture.home.crest} color={fixture.home.color} className="mx-auto size-14 text-sm" />
                 <p className="mt-2 truncate text-base font-black">{fixture.home.shortName}</p>
               </div>
-              <div className="rounded-2xl bg-white px-4 py-3 text-4xl font-black tabular-nums text-[#04070f]">
+              <div className="rounded-2xl bg-white px-4 py-3 text-4xl font-black tabular-nums text-[#02070a]">
                 {scoreLabel}
               </div>
               <div className="min-w-0 text-center">
@@ -122,9 +122,9 @@ export default async function CreatorRoomInvitePage({ params }: { params: { invi
                 {room.leaderboard.map((fan, index) => (
                   <div key={fan.id} className="flex items-center gap-3 rounded-2xl bg-white/10 p-3">
                     <span className="grid size-8 place-items-center rounded-xl bg-white text-xs font-black text-[#040814]">{index + 1}</span>
-                    <span className="grid size-9 place-items-center rounded-xl bg-[#0066ff]/25 text-xs font-black">{fan.avatar}</span>
+                    <span className="grid size-9 place-items-center rounded-xl bg-[#22D391]/20 text-xs font-black ring-1 ring-[#22D391]/25">{fan.avatar}</span>
                     <span className="min-w-0 flex-1 truncate text-sm font-bold">{fan.name}</span>
-                    <span className="text-sm font-black text-[#00e676]">{fan.points}</span>
+                    <span className="text-sm font-black text-[#22D391]">{fan.points}</span>
                   </div>
                 ))}
               </div>

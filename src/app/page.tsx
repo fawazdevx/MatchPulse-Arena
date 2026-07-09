@@ -321,7 +321,7 @@ export default function MatchPulseArena() {
     creatorName: "",
     handle: "",
     sponsor: "",
-    themeColor: "#00e676",
+    themeColor: "#22D391",
     inviteCode: ""
   });
   const [lastTick, setLastTick] = useState<ReplayTick | null>(null);
@@ -478,21 +478,22 @@ export default function MatchPulseArena() {
       let serverExplanation = fallbackResult.explanation;
       let serverTotals: { points?: number; bestStreak?: number } = {};
 
-      const answerResponse = await fetch("/api/game/answer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: walletUser?.id ?? "you",
-          predictionId: card.id,
-          optionId: selectedOption,
-          answeredAtMs: Math.round(performance.now()),
-          txlineEventId: event?.id,
-          roomId: selectedRoomId,
-          prediction: card,
-          resolvingEvent: event,
-          fan
-        })
-      }).catch(() => null);
+      const answerResponse = walletUser
+        ? await fetch("/api/game/answer", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              predictionId: card.id,
+              optionId: selectedOption,
+              answeredAtMs: Math.round(performance.now()),
+              txlineEventId: event?.id,
+              roomId: selectedRoomId,
+              prediction: card,
+              resolvingEvent: event,
+              fan
+            })
+          }).catch(() => null)
+        : null;
 
       if (answerResponse?.ok) {
         const serverResult = (await answerResponse.json()) as {
@@ -520,6 +521,9 @@ export default function MatchPulseArena() {
             bestStreak: serverResult.nextBestStreak
           };
         }
+      } else if (walletUser && answerResponse) {
+        const serverResult = (await answerResponse.json().catch(() => null)) as { error?: string } | null;
+        setWalletError(serverResult?.error ?? "Your answer was scored locally but could not be saved.");
       }
 
       const nextFan: FanState = {
@@ -791,10 +795,10 @@ export default function MatchPulseArena() {
 
   return (
     <main className="arena-shell min-h-screen text-white">
-      <div className="fixed inset-x-0 top-0 z-40 border-b border-white/[0.07] bg-[#04070f]/[0.72] shadow-[0_1px_0_rgba(255,255,255,0.04),0_18px_50px_-20px_rgba(0,0,0,0.9)] backdrop-blur-2xl backdrop-saturate-150">
+      <div className="fixed inset-x-0 top-0 z-40 border-b border-white/[0.07] bg-[#02070a]/[0.82] shadow-[0_1px_0_rgba(255,255,255,0.04),0_18px_50px_-20px_rgba(0,0,0,0.9)] backdrop-blur-2xl backdrop-saturate-150">
         <div className="mx-auto flex h-16 max-w-screen-2xl items-center justify-between gap-2 px-3 sm:px-4">
           <button className="group flex items-center gap-2 text-left" onClick={() => setScreen("home")} aria-label="Go to match list">
-            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#0066ff,#00e676)] text-sm font-black text-white shadow-[0_12px_34px_rgba(47,140,255,0.28)] transition group-hover:scale-105">MP</span>
+            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#0F3D2E,#22D391)] text-sm font-black text-white shadow-[0_12px_34px_rgba(34,211,145,0.24)] transition group-hover:scale-105">MP</span>
             <span className="min-w-0">
               <span className="block truncate text-sm font-black tracking-normal text-white">MatchPulse Arena</span>
               <span className="block truncate text-xs font-medium text-white/[0.54] max-[360px]:hidden">World Cup live room</span>
@@ -1021,7 +1025,7 @@ function HomeScreen({
             <div className="mt-5 space-y-3">
               {["Branded rooms", "Sponsored prediction cards", "Embeddable live widgets", "Premium creator analytics"].map((item) => (
                 <div key={item} className="flex items-center gap-3 rounded-2xl bg-white/10 px-3 py-3 text-sm font-semibold ring-1 ring-white/[0.06]">
-                  <CheckCircle2 className="h-4 w-4 text-[#00e676]" />
+                  <CheckCircle2 className="h-4 w-4 text-[#22D391]" />
                   {item}
                 </div>
               ))}
@@ -1076,7 +1080,7 @@ function TxLineSetupCard({ setupState }: { setupState: SetupState }) {
             ))}
           </div>
         ) : null}
-        {setupState.set && <p className="mt-4 rounded-2xl border border-white/[0.06] bg-[#04070f]/60 p-3 font-mono text-xs leading-5 text-[#9FC7FF]">{setupState.set}</p>}
+        {setupState.set && <p className="mt-4 rounded-2xl border border-white/[0.06] bg-[#02070a]/70 p-3 font-mono text-xs leading-5 text-[#BFE7D7]">{setupState.set}</p>}
         <Button asChild className="mt-5" variant="success">
           <a href="/txline-activate">Open TxLINE activation</a>
         </Button>
@@ -1100,7 +1104,7 @@ function MatchCard({ fixture, active, onSelect }: { fixture: MatchFixture; activ
       onClick={onSelect}
       className={cn(
         "group w-full overflow-hidden rounded-[1.35rem] border border-white/[0.06] bg-white/[0.06] p-4 text-left shadow-[0_18px_54px_rgba(0,0,0,0.22)] backdrop-blur transition duration-300 hover:-translate-y-1 hover:border-white/[0.18] hover:bg-white/[0.105]",
-        active && "border-[#00e676]/40 ring-2 ring-[#00e676]/[0.15]"
+        active && "border-[#22D391]/40 ring-2 ring-[#22D391]/[0.15]"
       )}
     >
       <div className="flex items-center justify-between">
@@ -1119,7 +1123,7 @@ function MatchCard({ fixture, active, onSelect }: { fixture: MatchFixture; activ
         <span className="max-w-[48%] truncate">{fixture.venue}</span>
       </div>
       <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/10">
-        <div className="h-full w-7/12 rounded-full bg-[linear-gradient(90deg,#0066ff,#00e676)] transition-all group-hover:w-10/12" />
+        <div className="h-full w-7/12 rounded-full bg-[linear-gradient(90deg,#22D391,#FFD166)] transition-all group-hover:w-10/12" />
       </div>
     </button>
   );
@@ -1294,7 +1298,7 @@ function Scoreboard({
           )}
           <div className="mt-6 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 sm:mt-7 sm:gap-3">
             <ScoreTeam team={fixture.home} side="home" score={score.home} />
-            <div className={cn("score-pop min-w-[4.75rem] rounded-[1.15rem] border border-white/[0.18] bg-white px-3 py-2 text-center text-3xl font-black tabular-nums text-[#04070f] shadow-[0_18px_48px_rgba(255,255,255,0.16)] sm:min-w-[7rem] sm:rounded-[1.25rem] sm:px-4 sm:py-3 sm:text-6xl", (waitingForSnapshot || snapshotUnavailable) && "animate-pulse text-[#5d6473]")}>
+            <div className={cn("score-pop min-w-[4.75rem] rounded-[1.15rem] border border-white/[0.18] bg-white px-3 py-2 text-center text-3xl font-black tabular-nums text-[#02070a] shadow-[0_18px_48px_rgba(255,255,255,0.16)] sm:min-w-[7rem] sm:rounded-[1.25rem] sm:px-4 sm:py-3 sm:text-6xl", (waitingForSnapshot || snapshotUnavailable) && "animate-pulse text-[#5d6473]")}>
               {waitingForSnapshot || snapshotUnavailable ? "–" : `${score.home}-${score.away}`}
             </div>
             <ScoreTeam team={fixture.away} side="away" score={score.away} />
@@ -1303,7 +1307,7 @@ function Scoreboard({
             <div className="flex w-max max-w-none gap-6 text-xs font-bold text-white/[0.66]">
               {tickerEvents.map((event) => (
                 <span key={event.id} className="flex items-center gap-2">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#00e676]" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#22D391]" />
                   {event.minute}&apos; {event.title}
                 </span>
               ))}
@@ -1392,10 +1396,10 @@ function PredictionPanel({
       key={card.id}
       className={cn(
         "glass-card float-in relative overflow-hidden border-0 transition",
-        isActive && "shadow-[0_0_0_1px_rgba(0,230,118,0.45),0_28px_80px_rgba(0,230,118,0.14)] ring-1 ring-[#00e676]/40"
+        isActive && "shadow-[0_0_0_1px_rgba(34,211,145,0.45),0_28px_80px_rgba(34,211,145,0.14)] ring-1 ring-[#22D391]/40"
       )}
     >
-      <div className={cn("absolute inset-x-0 top-0 h-1 bg-[linear-gradient(90deg,#0066ff,#00e676,#ffcc00)]", isActive && "shimmer")} />
+      <div className={cn("absolute inset-x-0 top-0 h-1 bg-[linear-gradient(90deg,#22D391,#FFD166,#FF5A5F)]", isActive && "shimmer")} />
       <CardHeader className="border-b border-white/[0.06] bg-white/[0.035] pb-4">
         <div className="flex flex-col gap-3 min-[420px]:flex-row min-[420px]:items-start min-[420px]:justify-between">
           <div className="min-w-0">
@@ -1409,7 +1413,7 @@ function PredictionPanel({
             <CardTitle className="text-xl leading-tight sm:text-2xl">{card.prompt}</CardTitle>
             <CardDescription className="mt-2">{card.context}</CardDescription>
           </div>
-          <div className={cn("relative grid h-16 w-16 shrink-0 place-items-center rounded-full bg-[conic-gradient(#00e676_0_72%,rgba(255,255,255,0.12)_72%_100%)] p-1 min-[420px]:self-start", isActive && "animate-energy-pulse")}>
+          <div className={cn("relative grid h-16 w-16 shrink-0 place-items-center rounded-full bg-[conic-gradient(#22D391_0_72%,rgba(255,255,255,0.12)_72%_100%)] p-1 min-[420px]:self-start", isActive && "animate-energy-pulse")}>
             <div className="grid h-full w-full place-items-center rounded-full bg-[#0a1122] text-center">
               <p className="text-[10px] font-bold text-white/50">Locks</p>
               <p className="-mt-1 text-lg font-black text-white">{card.lockAt}&apos;</p>
@@ -1420,7 +1424,7 @@ function PredictionPanel({
       <CardContent className="space-y-3 p-4">
         <div className="grid gap-2 sm:grid-cols-3">
           {card.options.map((option) => {
-            const teamColor = option.team ? (option.team === "home" ? fixture.home.color : fixture.away.color) : "#121e3d";
+            const teamColor = option.team ? (option.team === "home" ? fixture.home.color : fixture.away.color) : "#10231E";
             const selected = selectedOption === option.id;
             const isCorrect = state === "resolved" && card.resolved?.optionId === option.id;
 
@@ -1431,12 +1435,12 @@ function PredictionPanel({
                 onClick={() => onAnswer(option.id)}
                 className={cn(
                   "relative min-h-[76px] rounded-2xl border border-white/[0.06] bg-white/[0.06] px-3 py-3 text-left text-sm font-black text-white transition duration-200 hover:-translate-y-1 hover:border-white/[0.22] hover:bg-white/[0.12] disabled:hover:translate-y-0",
-                  selected && "score-pop border-[#0066ff]/60 bg-[#0066ff]/[0.16] ring-2 ring-[#0066ff]/20",
-                  isCorrect && "border-[#00e676]/60 bg-[#00e676]/[0.18] text-[#C6FFE8]"
+                  selected && "score-pop border-[#22D391]/60 bg-[#22D391]/[0.14] ring-2 ring-[#22D391]/20",
+                  isCorrect && "border-[#22D391]/60 bg-[#22D391]/[0.18] text-[#C6FFE8]"
                 )}
               >
                 {selected && (
-                  <CheckCircle2 className={cn("absolute right-2.5 top-2.5 h-4 w-4", isCorrect ? "text-[#00e676]" : "text-[#7fb0ff]")} />
+                  <CheckCircle2 className={cn("absolute right-2.5 top-2.5 h-4 w-4", isCorrect ? "text-[#22D391]" : "text-[#BFE7D7]")} />
                 )}
                 <span className="mb-3 block h-1.5 w-12 rounded-full shadow-[0_0_18px_rgba(255,255,255,0.16)]" style={{ backgroundColor: teamColor }} />
                 {option.label}
@@ -1500,7 +1504,7 @@ function MomentumPanel({
             <CardTitle>Pressure graph</CardTitle>
             <CardDescription>Live odds movement translated into fan-readable match pulse.</CardDescription>
           </div>
-          <LineChart className="h-5 w-5 shrink-0 text-[#00e676]" />
+          <LineChart className="h-5 w-5 shrink-0 text-[#22D391]" />
         </div>
       </CardHeader>
       <CardContent>
@@ -1600,7 +1604,7 @@ function StreakCard({ fan }: { fan: FanState }) {
             </div>
           </div>
           <div className="mt-4 h-3 overflow-hidden rounded-full bg-white/10 ring-1 ring-white/[0.06]">
-            <div className="h-full rounded-full bg-[linear-gradient(90deg,#00e676,#ffcc00,#ff3b30)] shadow-[0_0_24px_rgba(255,209,102,0.34)] transition-all duration-700" style={{ width: `${energy}%` }} />
+            <div className="h-full rounded-full bg-[linear-gradient(90deg,#22D391,#FFD166,#FF5A5F)] shadow-[0_0_24px_rgba(255,209,102,0.34)] transition-all duration-700" style={{ width: `${energy}%` }} />
           </div>
           <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
             <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/[0.06]">
@@ -1732,7 +1736,6 @@ function RightRail({ fan, users, onScreen }: { fan: FanState; users: Leaderboard
         </CardHeader>
         <CardContent>
           <div className="relative overflow-hidden rounded-[1.35rem] border border-white/[0.06] bg-[linear-gradient(145deg,rgba(47,140,255,0.2),rgba(255,255,255,0.06))] p-4 text-white">
-            <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-[#00e676]/20 blur-2xl" />
             <p className="text-xs font-bold text-white/60">Your MatchPulse card</p>
             <p className="mt-2 text-4xl font-black tabular-nums">{fan.points}</p>
             <p className="text-sm text-white/70">points / best streak {fan.bestStreak} / {fan.badges.length} badges</p>
@@ -1792,9 +1795,9 @@ function LeaderboardRow({ user, rank, compact = false }: { user: LeaderboardUser
   const rankTone = rank === 1 ? "text-[#ffcc00]" : rank === 2 ? "text-[#D8E4FF]" : rank === 3 ? "text-[#ffd699]" : "text-white/50";
 
   return (
-    <div className={cn("group flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.06] p-3 transition duration-300 hover:-translate-y-0.5 hover:bg-white/[0.105]", user.id === "you" && "border-[#00e676]/50 bg-[#00e676]/10 shadow-[0_0_0_1px_rgba(34,211,145,0.18)]")}>
+    <div className={cn("group flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.06] p-3 transition duration-300 hover:-translate-y-0.5 hover:bg-white/[0.105]", user.id === "you" && "border-[#22D391]/50 bg-[#22D391]/10 shadow-[0_0_0_1px_rgba(34,211,145,0.18)]")}>
       <span className={cn("w-8 shrink-0 text-center text-sm font-black tabular-nums", rankTone)}>#{rank}</span>
-      <span className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-xs font-black text-white ring-2", user.id === "you" ? "bg-[#00e676]/20 ring-[#00e676]/[0.45]" : "bg-white/10 ring-white/[0.12]")}>{user.avatar}</span>
+      <span className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-xs font-black text-white ring-2", user.id === "you" ? "bg-[#22D391]/20 ring-[#22D391]/[0.45]" : "bg-white/10 ring-white/[0.12]")}>{user.avatar}</span>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-black text-white">{user.name}</p>
         {!compact && <p className="text-xs text-white/[0.52]">Best streak {user.bestStreak} / {user.badges.length} badges</p>}
@@ -1935,11 +1938,11 @@ function CreatorScreen({
             <div>
               <label className="text-xs font-bold text-white/60">Theme color</label>
               <div className="mt-1 flex gap-2">
-                {["#C60B1E", "#00e676", "#1F4E9E", "#6C4CF6", "#121e3d"].map((color) => (
+                {["#C60B1E", "#22D391", "#FFD166", "#1F4E9E", "#10231E"].map((color) => (
                   <button
                     key={color}
                     aria-label={color}
-                    className={cn("h-10 w-10 rounded-2xl border-2 shadow-[0_12px_28px_rgba(0,0,0,0.22)] transition hover:-translate-y-0.5", config.themeColor === color ? "border-white ring-2 ring-[#0066ff]/[0.35]" : "border-white/[0.06]")}
+                    className={cn("h-10 w-10 rounded-2xl border-2 shadow-[0_12px_28px_rgba(0,0,0,0.22)] transition hover:-translate-y-0.5", config.themeColor === color ? "border-white ring-2 ring-[#22D391]/[0.35]" : "border-white/[0.06]")}
                     style={{ backgroundColor: color }}
                     onClick={() => onConfig({ ...config, themeColor: color })}
                   />
@@ -1950,7 +1953,7 @@ function CreatorScreen({
               <Bolt className="mr-2 h-4 w-4" />
               Launch Creator Cup room
             </Button>
-            {status && <p className="break-all rounded-2xl border border-[#00e676]/30 bg-[#00e676]/[0.12] p-3 text-sm font-semibold text-[#80ffb4]">{status}</p>}
+            {status && <p className="break-all rounded-2xl border border-[#22D391]/30 bg-[#22D391]/[0.12] p-3 text-sm font-semibold text-[#8AF2C9]">{status}</p>}
             {createdRoom && (
               <div className="grid gap-2 rounded-2xl border border-white/[0.06] bg-white/[0.06] p-3 text-sm font-semibold text-white/70 sm:grid-cols-2">
                 <a className="rounded-xl bg-white/10 px-3 py-2 text-center text-white transition hover:bg-white/[0.16]" href={createdRoom.inviteUrl}>
@@ -1966,7 +1969,7 @@ function CreatorScreen({
           </CardContent>
         </Card>
         <Card className="glass-card overflow-hidden border-0">
-          <CardHeader style={{ background: `linear-gradient(135deg, ${config.themeColor}, #04070f)` }} className="text-white">
+          <CardHeader style={{ background: `linear-gradient(135deg, ${config.themeColor}, #02070a)` }} className="text-white">
             <div className="flex items-center gap-3">
               <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/[0.18] text-sm font-black ring-1 ring-white/20">CC</span>
               <div>
@@ -1982,7 +1985,7 @@ function CreatorScreen({
               <p className="mt-2 text-lg font-black text-white">Will the next market reaction favor the team pressing higher?</p>
               <p className="mt-3 text-xs text-white/[0.56]">Presented by {config.sponsor}</p>
             </div>
-            <div className="overflow-x-auto break-all rounded-2xl border border-white/[0.06] bg-[#04070f]/70 p-3 font-mono text-xs text-white/[0.62]">
+            <div className="overflow-x-auto break-all rounded-2xl border border-white/[0.06] bg-[#02070a]/75 p-3 font-mono text-xs text-white/[0.62]">
               {createdRoom?.widgetEmbed ?? `<iframe src="https://matchpulse.arena/widget/${config.inviteCode}" width="360" height="640"></iframe>`}
             </div>
             <div className="grid gap-2 text-center text-xs font-bold text-white/70 sm:grid-cols-3">
@@ -2004,7 +2007,7 @@ function CreatorInput({ label, value, onChange }: { label: string; value: string
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-1 h-12 w-full rounded-2xl border border-white/[0.06] bg-white/[0.06] px-3 text-sm font-semibold text-white outline-none ring-[#0066ff]/20 transition placeholder:text-white/30 focus:border-[#0066ff]/50 focus:ring-4"
+        className="mt-1 h-12 w-full rounded-2xl border border-white/[0.06] bg-white/[0.06] px-3 text-sm font-semibold text-white outline-none ring-[#22D391]/20 transition placeholder:text-white/30 focus:border-[#22D391]/50 focus:ring-4"
       />
     </label>
   );
@@ -2064,7 +2067,7 @@ function Metric({ title, value, helper }: { title: string; value: string; helper
   return (
     <Card className="glass-card-soft overflow-hidden border-0">
       <CardContent className="p-4">
-        <div className="mb-4 h-1 w-12 rounded-full bg-[linear-gradient(90deg,#0066ff,#00e676)]" />
+        <div className="mb-4 h-1 w-12 rounded-full bg-[linear-gradient(90deg,#22D391,#FFD166)]" />
         <p className="text-sm font-bold text-white/[0.58]">{title}</p>
         <p className="mt-2 text-3xl font-black tabular-nums text-white">{value}</p>
         <p className="mt-1 text-xs font-semibold text-[#80ffb4]">{helper}</p>
@@ -2096,7 +2099,7 @@ function ReplayScreen({
         <CardContent className="grid gap-4 p-4 sm:grid-cols-[1fr_auto] sm:items-center">
           <div className="relative">
             <div className="mb-4 flex max-w-md items-center gap-2">
-              <span className={cn("h-3 rounded-full bg-[#00e676] transition-all", isReplaying ? "w-2/3 pulse-track" : "w-1/3")} />
+              <span className={cn("h-3 rounded-full bg-[#22D391] transition-all", isReplaying ? "w-2/3 pulse-track" : "w-1/3")} />
               <span className="h-3 flex-1 rounded-full bg-white/10" />
             </div>
             <p className="font-black text-white">Replay stream status: {status}</p>
@@ -2180,7 +2183,7 @@ function SectionHeader({ icon: Icon, title, description }: { icon: typeof Activi
   return (
     <div className="glass-card-soft rounded-[1.35rem] p-4">
       <div className="flex items-start gap-3">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#00e676]/[0.15] ring-1 ring-[#00e676]/25">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#22D391]/[0.15] ring-1 ring-[#22D391]/25">
           <Icon className="h-5 w-5 text-[#80ffb4]" />
         </span>
         <div className="min-w-0">
@@ -2205,7 +2208,7 @@ function MobileTabs({ current, onChange }: { current: Screen; onChange: (screen:
   ];
 
   return (
-    <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.08] bg-[#04070f]/92 px-2 pt-2 shadow-[0_-8px_30px_-12px_rgba(0,0,0,0.9)] backdrop-blur-2xl backdrop-saturate-150 lg:hidden">
+    <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.08] bg-[#02070a]/92 px-2 pt-2 shadow-[0_-8px_30px_-12px_rgba(0,0,0,0.9)] backdrop-blur-2xl backdrop-saturate-150 lg:hidden">
       <div className="scrollbar-none mx-auto flex snap-x gap-1 overflow-x-auto pb-0.5 md:justify-center">
         {items.map((item) => {
           const Icon = item.icon;
