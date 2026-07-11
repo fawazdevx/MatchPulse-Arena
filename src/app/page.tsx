@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
+  ArrowRight,
   BarChart3,
   Bolt,
   CheckCircle2,
@@ -321,7 +322,7 @@ export default function MatchPulseArena() {
     creatorName: "",
     handle: "",
     sponsor: "",
-    themeColor: "#22D391",
+    themeColor: "#1570EF",
     inviteCode: ""
   });
   const [lastTick, setLastTick] = useState<ReplayTick | null>(null);
@@ -795,12 +796,12 @@ export default function MatchPulseArena() {
 
   return (
     <main className="arena-shell min-h-screen text-white">
-      <div className="fixed inset-x-0 top-0 z-40 border-b border-white/[0.07] bg-[#02070a]/[0.82] shadow-[0_1px_0_rgba(255,255,255,0.04),0_18px_50px_-20px_rgba(0,0,0,0.9)] backdrop-blur-2xl backdrop-saturate-150">
+      <div className="fixed inset-x-0 top-0 z-40 border-b border-white/[0.08] bg-[#081A2F]/[0.82] shadow-[0_1px_0_rgba(255,255,255,0.04),0_18px_50px_-20px_rgba(4,12,24,0.9)] backdrop-blur-2xl backdrop-saturate-150">
         <div className="mx-auto flex h-16 max-w-screen-2xl items-center justify-between gap-2 px-3 sm:px-4">
           <button className="group flex items-center gap-2 text-left" onClick={() => setScreen("home")} aria-label="Go to match list">
-            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#0F3D2E,#22D391)] text-sm font-black text-white shadow-[0_12px_34px_rgba(34,211,145,0.24)] transition group-hover:scale-105">MP</span>
+            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#1570EF,#21E6A3)] font-anybody text-sm font-black text-white shadow-[0_12px_34px_rgba(21,112,239,0.34)] transition group-hover:scale-105">MP</span>
             <span className="min-w-0">
-              <span className="block truncate text-sm font-black tracking-normal text-white">MatchPulse Arena</span>
+              <span className="block truncate font-anybody text-sm font-black tracking-tight text-white">MatchPulse Arena</span>
               <span className="block truncate text-xs font-medium text-white/[0.54] max-[360px]:hidden">World Cup live room</span>
             </span>
           </button>
@@ -881,8 +882,8 @@ export default function MatchPulseArena() {
             />
           )}
 
-          {screen === "leaderboard" && <LeaderboardScreen users={topRank} currentRank={currentRank} />}
-          {screen === "passport" && <PassportScreen fan={fan} resolved={resolvedPredictions} />}
+          {screen === "leaderboard" && <LeaderboardScreen users={topRank} currentRank={currentRank} currentUserId={currentUserId} />}
+          {screen === "passport" && <PassportScreen fan={fan} resolved={resolvedPredictions} user={walletUser} />}
           {screen === "creator" && (
             <CreatorScreen
               fixture={selectedFixture}
@@ -896,7 +897,7 @@ export default function MatchPulseArena() {
               }}
             />
           )}
-          {screen === "analytics" && <AnalyticsScreen users={topRank} events={events} />}
+          {screen === "analytics" && <AnalyticsScreen users={topRank} events={events} currentUserId={currentUserId} />}
           {screen === "replay" && (
             <ReplayScreen
               isReplaying={isReplaying}
@@ -911,7 +912,7 @@ export default function MatchPulseArena() {
         </section>
 
         <aside className="hidden xl:block">
-          <RightRail fan={fan} users={topRank} onScreen={setScreen} />
+          <RightRail fan={fan} users={topRank} onScreen={setScreen} currentUserId={currentUserId} />
         </aside>
       </div>
 
@@ -939,13 +940,13 @@ function NavRail({ current, onChange, rank, streak }: { current: Screen; onChang
         <CardContent className="p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/[0.52]">Your room status</p>
           <div className="mt-4 grid grid-cols-2 gap-2">
-            <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/[0.06]">
+            <div className="rounded-2xl bg-white/[0.06] p-3 ring-1 ring-white/[0.08]">
               <p className="text-xs text-white/[0.56]">Room rank</p>
-              <p className="text-2xl font-black">{rank ? `#${rank}` : "Live"}</p>
+              <p className="font-data text-2xl font-black">{rank ? `#${rank}` : "Live"}</p>
             </div>
-            <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/[0.06]">
+            <div className="rounded-2xl bg-white/[0.06] p-3 ring-1 ring-white/[0.08]">
               <p className="text-xs text-white/[0.56]">Pulse streak</p>
-              <p className="text-2xl font-black">{streak}</p>
+              <p className="font-data text-2xl font-black">{streak}</p>
             </div>
           </div>
         </CardContent>
@@ -954,16 +955,18 @@ function NavRail({ current, onChange, rank, streak }: { current: Screen; onChang
         <CardContent className="space-y-1 p-2">
           {items.map((item) => {
             const Icon = item.icon;
+            const active = current === item.id;
             return (
               <button
                 key={item.id}
                 className={cn(
-                  "flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-sm font-bold text-white/[0.58] transition hover:bg-white/10 hover:text-white",
-                  current === item.id && "bg-white/[0.14] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]"
+                  "flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-sm font-bold text-white/[0.58] transition hover:bg-white/[0.08] hover:text-white",
+                  active && "bg-electric/[0.16] text-white shadow-[inset_0_0_0_1px_rgba(21,112,239,0.4),0_0_18px_rgba(21,112,239,0.25)]"
                 )}
                 onClick={() => onChange(item.id)}
+                aria-current={active ? "page" : undefined}
               >
-                <Icon className="h-4 w-4" />
+                <Icon className={cn("h-4 w-4", active && "text-electric-soft")} />
                 {item.label}
               </button>
             );
@@ -993,21 +996,21 @@ function HomeScreen({
 
   return (
     <div className="space-y-5">
-      <section className="relative overflow-hidden rounded-[1.75rem] border border-white/[0.06] bg-[linear-gradient(135deg,rgba(18,42,84,0.96),rgba(6,11,24,0.92))] text-white shadow-[0_34px_110px_rgba(0,0,0,0.38)]">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_76%_10%,rgba(47,140,255,0.34),transparent_24rem),radial-gradient(circle_at_12%_92%,rgba(32,227,178,0.16),transparent_22rem)]" />
+      <section className="relative overflow-hidden rounded-2xl border border-white/[0.1] bg-[linear-gradient(135deg,rgba(12,42,84,0.96),rgba(6,15,29,0.94))] text-white shadow-[0_34px_110px_rgba(4,12,24,0.45)]">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_76%_10%,rgba(21,112,239,0.34),transparent_24rem),radial-gradient(circle_at_12%_92%,rgba(33,230,163,0.18),transparent_22rem)]" />
         <div className="pulse-grid relative grid gap-5 p-5 sm:grid-cols-[1.12fr_0.88fr] sm:p-7 lg:p-9">
           <div>
-            <Badge variant="live" className="mb-4 gap-2 live-dot border-white/[0.18] bg-white/10 text-white">
+            <Badge variant="win" className="mb-4">
               No-money prediction arena
             </Badge>
-            <h1 className="max-w-xl text-balance text-[2.35rem] font-black leading-[1.02] tracking-normal sm:text-6xl">
+            <h1 className="max-w-xl text-balance font-anybody text-[2.35rem] font-black leading-[1.02] tracking-tight sm:text-6xl">
               Read the World Cup pulse before the room does.
             </h1>
             <p className="mt-5 max-w-2xl text-sm leading-7 text-white/70 sm:text-base">
               Join live watch rooms, answer fast micro-predictions, build a Pulse Streak, and climb creator leaderboards powered by TxLINE match and sentiment updates.
             </p>
             <div className="mt-5 flex flex-wrap gap-2">
-              <Button variant="success" onClick={() => featuredMatchId && onSelect(featuredMatchId)} disabled={!featuredMatchId}>
+              <Button variant="default" onClick={() => featuredMatchId && onSelect(featuredMatchId)} disabled={!featuredMatchId}>
                 <Radio className="mr-2 h-4 w-4" />
                 Join featured room
               </Button>
@@ -1017,15 +1020,15 @@ function HomeScreen({
               </Button>
             </div>
           </div>
-          <div className="glass-card-soft rounded-[1.35rem] p-4">
+          <div className="glass-card-soft rounded-2xl p-4">
             <div className="flex items-center justify-between">
               <p className="text-sm font-semibold text-white/70">Creator Cup preview</p>
-              <Sparkles className="h-5 w-5 text-[#ffcc00]" />
+              <Sparkles className="h-5 w-5 text-neon" />
             </div>
             <div className="mt-5 space-y-3">
               {["Branded rooms", "Sponsored prediction cards", "Embeddable live widgets", "Premium creator analytics"].map((item) => (
-                <div key={item} className="flex items-center gap-3 rounded-2xl bg-white/10 px-3 py-3 text-sm font-semibold ring-1 ring-white/[0.06]">
-                  <CheckCircle2 className="h-4 w-4 text-[#22D391]" />
+                <div key={item} className="flex items-center gap-3 rounded-2xl bg-white/[0.06] px-3 py-3 text-sm font-semibold ring-1 ring-white/[0.08]">
+                  <CheckCircle2 className="h-4 w-4 text-neon" />
                   {item}
                 </div>
               ))}
@@ -1037,7 +1040,7 @@ function HomeScreen({
       <section className="space-y-3">
         <div className="flex flex-col gap-2 min-[420px]:flex-row min-[420px]:items-end min-[420px]:justify-between">
           <div className="min-w-0">
-            <h2 className="text-2xl font-black text-white">Today&apos;s World Cup rooms</h2>
+            <h2 className="font-anybody text-2xl font-black text-white">Today&apos;s World Cup rooms</h2>
             <p className="text-sm text-white/[0.55]">Live fixtures loaded through the server-side TxLINE adapter.</p>
           </div>
           <Badge variant="win">Fan-safe</Badge>
@@ -1080,7 +1083,7 @@ function TxLineSetupCard({ setupState }: { setupState: SetupState }) {
             ))}
           </div>
         ) : null}
-        {setupState.set && <p className="mt-4 rounded-2xl border border-white/[0.06] bg-[#02070a]/70 p-3 font-mono text-xs leading-5 text-[#BFE7D7]">{setupState.set}</p>}
+        {setupState.set && <p className="mt-4 rounded-2xl border border-white/[0.08] bg-navy-deep/70 p-3 font-mono text-xs leading-5 text-[#BFE7D7]">{setupState.set}</p>}
         <Button asChild className="mt-5" variant="success">
           <a href="/txline-activate">Open TxLINE activation</a>
         </Button>
@@ -1099,31 +1102,38 @@ function EmptyState({ title, description }: { title: string; description: string
 }
 
 function MatchCard({ fixture, active, onSelect }: { fixture: MatchFixture; active: boolean; onSelect: () => void }) {
+  const isLive = fixture.status === "live";
   return (
     <button
       onClick={onSelect}
       className={cn(
-        "group w-full overflow-hidden rounded-[1.35rem] border border-white/[0.06] bg-white/[0.06] p-4 text-left shadow-[0_18px_54px_rgba(0,0,0,0.22)] backdrop-blur transition duration-300 hover:-translate-y-1 hover:border-white/[0.18] hover:bg-white/[0.105]",
-        active && "border-[#22D391]/40 ring-2 ring-[#22D391]/[0.15]"
+        "group w-full overflow-hidden rounded-2xl border border-white/[0.1] bg-white/[0.05] p-4 text-left shadow-[0_18px_54px_rgba(4,12,24,0.32)] backdrop-blur transition duration-300 hover:-translate-y-1 hover:border-electric/40 hover:bg-white/[0.09]",
+        active && "border-neon/45 ring-2 ring-neon/[0.18]"
       )}
     >
       <div className="flex items-center justify-between">
-        <Badge variant={fixture.status === "live" ? "live" : "secondary"} className={cn(fixture.status === "live" && "gap-2 live-dot")}>
-          {fixture.status === "live" ? "Live room" : formatKickoff(fixture.kickoffIso)}
+        <Badge variant={isLive ? "live" : "secondary"} className={cn(isLive && "gap-2 live-dot")}>
+          {isLive ? "Live now" : fixture.status === "full" ? "Full time" : formatKickoff(fixture.kickoffIso)}
         </Badge>
         {fixture.creatorRoom && <Badge variant="creator">Creator Cup</Badge>}
       </div>
       <div className="mt-4 flex items-center justify-between gap-2 sm:gap-3">
         <TeamMark team={fixture.home} />
-        <span className="shrink-0 rounded-full bg-white/10 px-2.5 py-1 text-xs font-black text-white/[0.56] ring-1 ring-white/[0.06]">VS</span>
+        <span className="shrink-0 rounded-full bg-white/[0.08] px-2.5 py-1 font-data text-[0.65rem] font-bold text-white/[0.6] ring-1 ring-white/[0.08]">VS</span>
         <TeamMark team={fixture.away} align="right" />
       </div>
-      <div className="mt-4 flex items-center justify-between text-xs text-white/[0.48]">
-        <span>{fixture.stage}</span>
+      <div className="mt-4 flex items-center justify-between gap-2 text-xs text-white/[0.5]">
+        <span className="truncate">{fixture.stage}</span>
         <span className="max-w-[48%] truncate">{fixture.venue}</span>
       </div>
-      <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/10">
-        <div className="h-full w-7/12 rounded-full bg-[linear-gradient(90deg,#22D391,#FFD166)] transition-all group-hover:w-10/12" />
+      <div className="mt-4 flex items-center justify-between rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2">
+        <span className="text-xs font-semibold text-white/[0.6]">
+          {isLive ? "Room open — read the pulse" : "Tap to open the room"}
+        </span>
+        <span className="flex items-center gap-1 text-xs font-bold text-neon transition-transform group-hover:translate-x-0.5">
+          Enter
+          <ArrowRight className="h-3.5 w-3.5" />
+        </span>
       </div>
     </button>
   );
@@ -1298,7 +1308,7 @@ function Scoreboard({
           )}
           <div className="mt-6 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 sm:mt-7 sm:gap-3">
             <ScoreTeam team={fixture.home} side="home" score={score.home} />
-            <div className={cn("score-pop min-w-[4.75rem] rounded-[1.15rem] border border-white/[0.18] bg-white px-3 py-2 text-center text-3xl font-black tabular-nums text-[#02070a] shadow-[0_18px_48px_rgba(255,255,255,0.16)] sm:min-w-[7rem] sm:rounded-[1.25rem] sm:px-4 sm:py-3 sm:text-6xl", (waitingForSnapshot || snapshotUnavailable) && "animate-pulse text-[#5d6473]")}>
+            <div className={cn("score-pop min-w-[4.75rem] rounded-[1.15rem] border border-white/[0.18] bg-white px-3 py-2 text-center font-data text-3xl font-black text-[#081A2F] shadow-[0_18px_48px_rgba(255,255,255,0.16)] sm:min-w-[7rem] sm:rounded-[1.25rem] sm:px-4 sm:py-3 sm:text-6xl", (waitingForSnapshot || snapshotUnavailable) && "animate-pulse text-[#5d6473]")}>
               {waitingForSnapshot || snapshotUnavailable ? "–" : `${score.home}-${score.away}`}
             </div>
             <ScoreTeam team={fixture.away} side="away" score={score.away} />
@@ -1328,7 +1338,7 @@ function ScoreTeam({ team, side }: { team: MatchFixture["home"]; side: TeamKey; 
       <div className={cn("flex items-center gap-2.5 sm:gap-3", side === "away" && "justify-end")}>
         {side === "home" && <TeamCrest name={team.name} crest={team.crest} color={team.color} className="h-11 w-11 sm:h-14 sm:w-14 sm:text-sm" />}
         <div className="min-w-0">
-          <p className="truncate text-xl font-black sm:text-3xl">{team.shortName}</p>
+          <p className="truncate font-anybody text-xl font-black sm:text-3xl">{team.shortName}</p>
           <p className="hidden truncate text-xs font-medium text-white/[0.54] min-[390px]:block sm:text-sm">{team.name}</p>
         </div>
         {side === "away" && <TeamCrest name={team.name} crest={team.crest} color={team.color} className="h-11 w-11 sm:h-14 sm:w-14 sm:text-sm" />}
@@ -1349,7 +1359,7 @@ function MomentumBar({ fixture, sentiment }: { fixture: MatchFixture; sentiment:
         <div className="bg-white/40 transition-all duration-500" style={{ width: `${sentiment.draw}%` }} />
         <div className="transition-all duration-500" style={{ width: `${sentiment.away}%`, backgroundColor: fixture.away.color }} />
       </div>
-      <div className="mt-2 grid grid-cols-3 text-xs font-semibold text-white/[0.54]">
+      <div className="mt-2 grid grid-cols-3 font-data text-xs font-semibold text-white/[0.54]">
         <span>{fixture.home.shortName} {sentiment.home}%</span>
         <span className="text-center">Draw {sentiment.draw}%</span>
         <span className="text-right">{fixture.away.shortName} {sentiment.away}%</span>
@@ -1396,10 +1406,10 @@ function PredictionPanel({
       key={card.id}
       className={cn(
         "glass-card float-in relative overflow-hidden border-0 transition",
-        isActive && "shadow-[0_0_0_1px_rgba(34,211,145,0.45),0_28px_80px_rgba(34,211,145,0.14)] ring-1 ring-[#22D391]/40"
+        isActive && "shadow-[0_0_0_1px_rgba(33,230,163,0.45),0_28px_80px_rgba(33,230,163,0.14)] ring-1 ring-neon/40"
       )}
     >
-      <div className={cn("absolute inset-x-0 top-0 h-1 bg-[linear-gradient(90deg,#22D391,#FFD166,#FF5A5F)]", isActive && "shimmer")} />
+      <div className={cn("absolute inset-x-0 top-0 h-1 bg-[linear-gradient(90deg,#1570EF,#21E6A3)]", isActive && "shimmer")} />
       <CardHeader className="border-b border-white/[0.06] bg-white/[0.035] pb-4">
         <div className="flex flex-col gap-3 min-[420px]:flex-row min-[420px]:items-start min-[420px]:justify-between">
           <div className="min-w-0">
@@ -1413,10 +1423,10 @@ function PredictionPanel({
             <CardTitle className="text-xl leading-tight sm:text-2xl">{card.prompt}</CardTitle>
             <CardDescription className="mt-2">{card.context}</CardDescription>
           </div>
-          <div className={cn("relative grid h-16 w-16 shrink-0 place-items-center rounded-full bg-[conic-gradient(#22D391_0_72%,rgba(255,255,255,0.12)_72%_100%)] p-1 min-[420px]:self-start", isActive && "animate-energy-pulse")}>
-            <div className="grid h-full w-full place-items-center rounded-full bg-[#0a1122] text-center">
+          <div className={cn("relative grid h-16 w-16 shrink-0 place-items-center rounded-full bg-[conic-gradient(#21E6A3_0_72%,rgba(255,255,255,0.12)_72%_100%)] p-1 min-[420px]:self-start", isActive && "animate-energy-pulse")}>
+            <div className="grid h-full w-full place-items-center rounded-full bg-navy-deep text-center">
               <p className="text-[10px] font-bold text-white/50">Locks</p>
-              <p className="-mt-1 text-lg font-black text-white">{card.lockAt}&apos;</p>
+              <p className="-mt-1 font-data text-lg font-black text-white">{card.lockAt}&apos;</p>
             </div>
           </div>
         </div>
@@ -1424,7 +1434,7 @@ function PredictionPanel({
       <CardContent className="space-y-3 p-4">
         <div className="grid gap-2 sm:grid-cols-3">
           {card.options.map((option) => {
-            const teamColor = option.team ? (option.team === "home" ? fixture.home.color : fixture.away.color) : "#10231E";
+            const teamColor = option.team ? (option.team === "home" ? fixture.home.color : fixture.away.color) : "#1570EF";
             const selected = selectedOption === option.id;
             const isCorrect = state === "resolved" && card.resolved?.optionId === option.id;
 
@@ -1434,13 +1444,13 @@ function PredictionPanel({
                 disabled={locked}
                 onClick={() => onAnswer(option.id)}
                 className={cn(
-                  "relative min-h-[76px] rounded-2xl border border-white/[0.06] bg-white/[0.06] px-3 py-3 text-left text-sm font-black text-white transition duration-200 hover:-translate-y-1 hover:border-white/[0.22] hover:bg-white/[0.12] disabled:hover:translate-y-0",
-                  selected && "score-pop border-[#22D391]/60 bg-[#22D391]/[0.14] ring-2 ring-[#22D391]/20",
-                  isCorrect && "border-[#22D391]/60 bg-[#22D391]/[0.18] text-[#C6FFE8]"
+                  "relative min-h-[76px] rounded-2xl border border-white/[0.1] bg-white/[0.05] px-3 py-3 text-left text-sm font-black text-white transition duration-200 hover:-translate-y-1 hover:border-white/[0.24] hover:bg-white/[0.1] disabled:hover:translate-y-0",
+                  selected && "score-pop border-neon/60 bg-neon/[0.14] ring-2 ring-neon/25",
+                  isCorrect && "border-neon/60 bg-neon/[0.18] text-[#C6FFE8]"
                 )}
               >
                 {selected && (
-                  <CheckCircle2 className={cn("absolute right-2.5 top-2.5 h-4 w-4", isCorrect ? "text-[#22D391]" : "text-[#BFE7D7]")} />
+                  <CheckCircle2 className={cn("absolute right-2.5 top-2.5 h-4 w-4", isCorrect ? "text-neon" : "text-[#BFE7D7]")} />
                 )}
                 <span className="mb-3 block h-1.5 w-12 rounded-full shadow-[0_0_18px_rgba(255,255,255,0.16)]" style={{ backgroundColor: teamColor }} />
                 {option.label}
@@ -1508,10 +1518,10 @@ function MomentumPanel({
         </div>
       </CardHeader>
       <CardContent>
-        <div className="relative h-40 overflow-hidden rounded-[1.2rem] border border-white/[0.06] bg-[radial-gradient(circle_at_50%_0%,rgba(47,140,255,0.18),transparent_18rem),rgba(255,255,255,0.055)] p-3">
+        <div className="relative h-40 overflow-hidden rounded-[1.2rem] border border-white/[0.1] bg-[radial-gradient(circle_at_50%_0%,rgba(21,112,239,0.2),transparent_18rem),rgba(255,255,255,0.04)] p-3">
           {hasGraph ? (
             <>
-              <div className="momentum-wave absolute inset-y-6 left-0 w-[120%] rounded-full bg-[linear-gradient(90deg,transparent,rgba(47,140,255,0.1),rgba(34,211,153,0.14),transparent)] blur-xl" />
+              <div className="momentum-wave absolute inset-y-6 left-0 w-[120%] rounded-full bg-[linear-gradient(90deg,transparent,rgba(21,112,239,0.12),rgba(33,230,163,0.16),transparent)] blur-xl" />
               <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="relative h-full w-full overflow-visible">
                 <polyline points={homePoints.join(" ")} fill="none" stroke={fixture.home.color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
                 <polyline points={awayPoints.join(" ")} fill="none" stroke={fixture.away.color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" opacity="0.75" />
@@ -1519,8 +1529,10 @@ function MomentumPanel({
             </>
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-              <span className="live-dot flex items-center gap-2 text-xs font-bold text-white/70" />
-              <p className="text-sm font-black text-white">Building momentum</p>
+              <span className="grid h-9 w-9 place-items-center rounded-full bg-electric/[0.16] ring-1 ring-electric/25">
+                <Gauge className="h-4 w-4 text-electric-soft" />
+              </span>
+              <p className="font-anybody text-sm font-black text-white">Building momentum</p>
               <p className="max-w-[16rem] text-xs text-white/[0.54]">The pressure graph plots as live TxLINE odds updates arrive. {history.length}/3 readings so far.</p>
             </div>
           )}
@@ -1557,7 +1569,7 @@ function Timeline({ events }: { events: MatchEvent[] }) {
           return (
             <div key={event.id} className="float-in flex gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.06] p-3 transition hover:bg-white/[0.105]">
               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/10 ring-1 ring-white/[0.06]">
-                <Icon className="h-4 w-4 text-[#80ffb4]" />
+                <Icon className="h-4 w-4 text-neon" />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
@@ -1581,39 +1593,39 @@ function StreakCard({ fan }: { fan: FanState }) {
 
   return (
     <Card className="glass-card relative overflow-hidden border-0">
-      <div className="absolute -right-8 -top-10 h-32 w-32 rounded-full bg-[#ffcc00]/20 blur-3xl" />
+      <div className="absolute -right-8 -top-10 h-32 w-32 rounded-full bg-neon/20 blur-3xl" />
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle>Pulse Streak</CardTitle>
-          <span className="grid h-11 w-11 place-items-center rounded-2xl bg-[#ffcc00]/[0.15] ring-1 ring-[#ffcc00]/20">
-            <Flame className="h-5 w-5 text-[#ffcc00]" />
+          <span className="grid h-11 w-11 place-items-center rounded-2xl bg-neon/[0.15] ring-1 ring-neon/25">
+            <Flame className="h-5 w-5 text-neon" />
           </span>
         </div>
       </CardHeader>
       <CardContent>
-        <div className="relative overflow-hidden rounded-[1.35rem] border border-white/[0.06] bg-[linear-gradient(145deg,rgba(255,176,32,0.14),rgba(255,255,255,0.06))] p-4 text-white">
-          <div className="absolute inset-x-4 bottom-0 h-px bg-[linear-gradient(90deg,transparent,#ffcc00,transparent)]" />
+        <div className="relative overflow-hidden rounded-2xl border border-white/[0.1] bg-[linear-gradient(145deg,rgba(33,230,163,0.14),rgba(255,255,255,0.05))] p-4 text-white">
+          <div className="absolute inset-x-4 bottom-0 h-px bg-[linear-gradient(90deg,transparent,#21E6A3,transparent)]" />
           <div className="flex items-end justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/60">Current combo</p>
-              <p className="mt-1 text-5xl font-black tabular-nums sm:text-6xl">{fan.streak}</p>
+              <p className="mt-1 font-data text-5xl font-black sm:text-6xl">{fan.streak}</p>
             </div>
             <div className="text-right">
               <p className="text-xs font-semibold text-white/[0.55]">Next milestone</p>
-              <p className="text-2xl font-black">{fan.streak < 3 ? 3 : fan.streak < 5 ? 5 : 10}x</p>
+              <p className="font-data text-2xl font-black">{fan.streak < 3 ? 3 : fan.streak < 5 ? 5 : 10}x</p>
             </div>
           </div>
-          <div className="mt-4 h-3 overflow-hidden rounded-full bg-white/10 ring-1 ring-white/[0.06]">
-            <div className="h-full rounded-full bg-[linear-gradient(90deg,#22D391,#FFD166,#FF5A5F)] shadow-[0_0_24px_rgba(255,209,102,0.34)] transition-all duration-700" style={{ width: `${energy}%` }} />
+          <div className="mt-4 h-3 overflow-hidden rounded-full bg-white/10 ring-1 ring-white/[0.08]">
+            <div className="h-full rounded-full bg-[linear-gradient(90deg,#1570EF,#21E6A3)] shadow-[0_0_24px_rgba(33,230,163,0.4)] transition-all duration-700" style={{ width: `${energy}%` }} />
           </div>
           <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-            <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/[0.06]">
+            <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/[0.08]">
               <p className="text-white/60">Points</p>
-              <p className="text-xl font-black tabular-nums">{fan.points}</p>
+              <p className="font-data text-xl font-black">{fan.points}</p>
             </div>
-            <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/[0.06]">
+            <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/[0.08]">
               <p className="text-white/60">Best streak</p>
-              <p className="text-xl font-black tabular-nums">{fan.bestStreak}</p>
+              <p className="font-data text-xl font-black">{fan.bestStreak}</p>
             </div>
           </div>
         </div>
@@ -1690,7 +1702,7 @@ function CreatorRoomCard({ fixture, onCreator }: { fixture: MatchFixture; onCrea
   );
 }
 
-function RightRail({ fan, users, onScreen }: { fan: FanState; users: LeaderboardUser[]; onScreen: (screen: Screen) => void }) {
+function RightRail({ fan, users, onScreen, currentUserId }: { fan: FanState; users: LeaderboardUser[]; onScreen: (screen: Screen) => void; currentUserId: string }) {
   const [shareState, setShareState] = useState<"idle" | "shared" | "copied">("idle");
 
   const shareResult = async () => {
@@ -1719,7 +1731,7 @@ function RightRail({ fan, users, onScreen }: { fan: FanState; users: Leaderboard
         <CardContent className="space-y-2">
           {users.length ? (
             users.slice(0, 5).map((user, index) => (
-              <LeaderboardRow key={user.id} user={user} rank={index + 1} compact />
+              <LeaderboardRow key={user.id} user={user} rank={index + 1} compact currentUserId={currentUserId} />
             ))
           ) : (
             <p className="rounded-2xl border border-white/[0.06] bg-white/[0.06] p-4 text-sm text-white/[0.56]">Answer a prediction to appear on the room leaderboard.</p>
@@ -1735,16 +1747,16 @@ function RightRail({ fan, users, onScreen }: { fan: FanState; users: Leaderboard
           <CardDescription>Your live fan card for this room.</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="relative overflow-hidden rounded-[1.35rem] border border-white/[0.06] bg-[linear-gradient(145deg,rgba(47,140,255,0.2),rgba(255,255,255,0.06))] p-4 text-white">
+          <div className="relative overflow-hidden rounded-2xl border border-white/[0.1] bg-[linear-gradient(145deg,rgba(21,112,239,0.24),rgba(255,255,255,0.05))] p-4 text-white">
             <p className="text-xs font-bold text-white/60">Your MatchPulse card</p>
-            <p className="mt-2 text-4xl font-black tabular-nums">{fan.points}</p>
+            <p className="mt-2 font-data text-4xl font-black">{fan.points}</p>
             <p className="text-sm text-white/70">points / best streak {fan.bestStreak} / {fan.badges.length} badges</p>
-            <div className="mt-4 flex items-center gap-2 text-xs font-bold text-[#80ffb4]">
+            <div className="mt-4 flex items-center gap-2 text-xs font-bold text-neon">
               <Crown className="h-4 w-4" />
               MatchPulse result card
             </div>
           </div>
-          <Button className="mt-3 w-full" variant="pulse" onClick={shareResult} disabled={fan.answered === 0}>
+          <Button className="mt-3 w-full" variant="default" onClick={shareResult} disabled={fan.answered === 0}>
             <Share2 className="mr-2 h-4 w-4" />
             {shareState === "shared" ? "Shared" : shareState === "copied" ? "Copied to clipboard" : fan.answered === 0 ? "Answer a card to share" : "Share result"}
           </Button>
@@ -1754,7 +1766,7 @@ function RightRail({ fan, users, onScreen }: { fan: FanState; users: Leaderboard
   );
 }
 
-function LeaderboardScreen({ users, currentRank }: { users: LeaderboardUser[]; currentRank: number }) {
+function LeaderboardScreen({ users, currentRank, currentUserId }: { users: LeaderboardUser[]; currentRank: number; currentUserId: string }) {
   const podium = users.slice(0, 3);
   const rest = users.slice(3);
 
@@ -1770,11 +1782,11 @@ function LeaderboardScreen({ users, currentRank }: { users: LeaderboardUser[]; c
               const height = rank === 1 ? "h-32" : rank === 2 ? "h-24" : "h-20";
               return (
                 <div key={user.id} className="text-center">
-                  <div className={cn("mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-2xl text-xs font-black text-white ring-2 sm:h-14 sm:w-14 sm:text-sm", rank === 1 ? "bg-[#ffcc00]/20 ring-[#ffcc00]/[0.45]" : "bg-white/10 ring-white/[0.15]")}>{user.avatar}</div>
+                  <div className={cn("mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-2xl font-anybody text-xs font-black text-white ring-2 sm:h-14 sm:w-14 sm:text-sm", rank === 1 ? "bg-[#ffcc00]/20 ring-[#ffcc00]/[0.45]" : "bg-white/10 ring-white/[0.15]")}>{user.avatar}</div>
                   <p className="truncate text-xs font-black text-white">{user.name}</p>
-                  <p className="text-xs text-white/50">{user.points} pts</p>
-                  <div className={cn("mt-3 rounded-t-[1.35rem] border border-white/[0.06] bg-white/[0.06] p-2 sm:p-3", height)}>
-                    <p className={cn("text-2xl font-black sm:text-3xl", rank === 1 ? "text-[#ffcc00]" : "text-white")}>#{rank}</p>
+                  <p className="font-data text-xs text-white/50">{user.points} pts</p>
+                  <div className={cn("mt-3 rounded-t-2xl border border-white/[0.08] bg-white/[0.05] p-2 sm:p-3", height)}>
+                    <p className={cn("font-data text-2xl font-black sm:text-3xl", rank === 1 ? "text-[#ffcc00]" : "text-white")}>#{rank}</p>
                   </div>
                 </div>
               );
@@ -1782,7 +1794,7 @@ function LeaderboardScreen({ users, currentRank }: { users: LeaderboardUser[]; c
           </div>
           <div className="space-y-2">
             {rest.map((user, index) => (
-              <LeaderboardRow key={user.id} user={user} rank={index + 4} />
+              <LeaderboardRow key={user.id} user={user} rank={index + 4} currentUserId={currentUserId} />
             ))}
           </div>
         </CardContent>
@@ -1791,62 +1803,66 @@ function LeaderboardScreen({ users, currentRank }: { users: LeaderboardUser[]; c
   );
 }
 
-function LeaderboardRow({ user, rank, compact = false }: { user: LeaderboardUser; rank: number; compact?: boolean }) {
+function LeaderboardRow({ user, rank, compact = false, currentUserId = "you" }: { user: LeaderboardUser; rank: number; compact?: boolean; currentUserId?: string }) {
   const rankTone = rank === 1 ? "text-[#ffcc00]" : rank === 2 ? "text-[#D8E4FF]" : rank === 3 ? "text-[#ffd699]" : "text-white/50";
+  const isYou = user.id === currentUserId;
 
   return (
-    <div className={cn("group flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.06] p-3 transition duration-300 hover:-translate-y-0.5 hover:bg-white/[0.105]", user.id === "you" && "border-[#22D391]/50 bg-[#22D391]/10 shadow-[0_0_0_1px_rgba(34,211,145,0.18)]")}>
-      <span className={cn("w-8 shrink-0 text-center text-sm font-black tabular-nums", rankTone)}>#{rank}</span>
-      <span className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-xs font-black text-white ring-2", user.id === "you" ? "bg-[#22D391]/20 ring-[#22D391]/[0.45]" : "bg-white/10 ring-white/[0.12]")}>{user.avatar}</span>
+    <div className={cn("group flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.05] p-3 transition duration-300 hover:-translate-y-0.5 hover:bg-white/[0.09]", isYou && "border-neon/50 bg-neon/10 shadow-[0_0_0_1px_rgba(33,230,163,0.2)]")}>
+      <span className={cn("w-8 shrink-0 text-center font-data text-sm font-black", rankTone)}>#{rank}</span>
+      <span className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl font-anybody text-xs font-black text-white ring-2", isYou ? "bg-neon/20 ring-neon/[0.45]" : "bg-white/10 ring-white/[0.12]")}>{user.avatar}</span>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-black text-white">{user.name}</p>
         {!compact && <p className="text-xs text-white/[0.52]">Best streak {user.bestStreak} / {user.badges.length} badges</p>}
       </div>
       <div className="shrink-0 text-right">
-        <p className="text-sm font-black tabular-nums text-white">{user.points}</p>
-        <p className="text-xs text-[#ffcc00]">{user.streak} streak</p>
+        <p className="font-data text-sm font-black text-white">{user.points}</p>
+        <p className="text-xs text-neon">{user.streak} streak</p>
       </div>
     </div>
   );
 }
 
-function PassportScreen({ fan, resolved }: { fan: FanState; resolved: ResolvedPrediction[] }) {
+function PassportScreen({ fan, resolved, user }: { fan: FanState; resolved: ResolvedPrediction[]; user: AuthUser | null }) {
   const accuracy = fan.answered ? Math.round((fan.correct / fan.answered) * 100) : 0;
+  const avatar = user?.avatar ?? "YOU";
+  const displayName = user?.name ?? "Guest fan";
 
   return (
     <div className="space-y-5">
       <SectionHeader icon={Medal} title="Fan Passport" description="Your streaks, badges, prediction reads, and shareable match result." />
       <Card className="premium-card overflow-hidden border-0">
         <CardContent className="grid gap-4 p-4 md:grid-cols-[0.8fr_1.2fr]">
-          <div className="relative overflow-hidden rounded-[1.5rem] border border-white/[0.06] bg-[radial-gradient(circle_at_20%_0%,rgba(47,140,255,0.3),transparent_18rem),rgba(255,255,255,0.07)] p-5 text-white">
-            <div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-[#ffcc00]/20 blur-3xl" />
+          <div className="relative overflow-hidden rounded-[1.5rem] border border-white/[0.1] bg-[radial-gradient(circle_at_20%_0%,rgba(21,112,239,0.32),transparent_18rem),rgba(255,255,255,0.05)] p-5 text-white">
+            <div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-neon/20 blur-3xl" />
             <div className="flex items-center gap-3">
-              <span className="grid h-16 w-16 place-items-center rounded-[1.35rem] bg-white/10 text-xl font-black ring-1 ring-white/[0.15]">YOU</span>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/60">Fan passport</p>
-                <p className="text-xl font-black">Level {Math.max(1, Math.floor(fan.points / 500))}</p>
+              <span className="grid h-16 w-16 place-items-center rounded-[1.35rem] bg-white/10 font-anybody text-xl font-black ring-1 ring-white/[0.16]">{avatar}</span>
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold uppercase tracking-[0.16em] text-white/60">{user ? "Wallet fan" : "Guest passport"}</p>
+                <p className="truncate font-anybody text-xl font-black">{displayName}</p>
+                <p className="text-xs font-semibold text-white/[0.5]">Level {Math.max(1, Math.floor(fan.points / 500))}</p>
               </div>
             </div>
-            <p className="mt-5 text-4xl font-black tabular-nums sm:text-5xl">{fan.points}</p>
-            <p className="text-sm text-white/70">points earned</p>
+            <p className="mt-5 font-data text-4xl font-black sm:text-5xl">{fan.points}</p>
+            <p className="text-sm text-white/70">points earned{user ? "" : " · connect a wallet to save"}</p>
             <div className="mt-4 grid grid-cols-2 gap-2">
-              <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/[0.06]">
+              <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/[0.08]">
                 <p className="text-xs text-white/60">Best streak</p>
-                <p className="text-2xl font-black">{fan.bestStreak}</p>
+                <p className="font-data text-2xl font-black">{fan.bestStreak}</p>
               </div>
-              <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/[0.06]">
+              <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/[0.08]">
                 <p className="text-xs text-white/60">Accuracy</p>
-                <p className="text-2xl font-black">{accuracy}%</p>
+                <p className="font-data text-2xl font-black">{accuracy}%</p>
               </div>
             </div>
           </div>
           <div>
-            <h3 className="font-black text-white">Badge collection</h3>
+            <h3 className="font-anybody font-black text-white">Badge collection</h3>
             <div className="mt-3 grid gap-2 sm:grid-cols-2 md:grid-cols-1 lg:grid-cols-2">
               {badges.map((badge) => {
                 const unlocked = fan.badges.includes(badge.id);
                 return (
-                  <div key={badge.id} className={cn("rounded-2xl border px-3 py-3 text-sm transition duration-300 hover:-translate-y-0.5", unlocked ? `shimmer ${badgeToneClass[badge.tone]}` : "border-white/[0.06] bg-white/[0.055] text-white/[0.42]")}>
+                  <div key={badge.id} className={cn("rounded-2xl border px-3 py-3 text-sm transition duration-300 hover:-translate-y-0.5", unlocked ? `shimmer ${badgeToneClass[badge.tone]}` : "border-white/[0.08] bg-white/[0.04] text-white/[0.42]")}>
                     <p className="font-black">{badge.name}</p>
                     <p className="mt-1 text-xs">{badge.description}</p>
                   </div>
@@ -1892,33 +1908,52 @@ function CreatorScreen({
   onConfig: (config: CreatorConfig) => void;
   onCaptain: () => void;
 }) {
-  const [status, setStatus] = useState<string | null>(null);
+  const [status, setStatus] = useState<{ tone: "info" | "error" | "success"; message: string } | null>(null);
+  const [launching, setLaunching] = useState(false);
   const [createdRoom, setCreatedRoom] = useState<{ inviteUrl: string; widgetUrl?: string; widgetEmbed?: string } | null>(null);
 
+  const canLaunch = Boolean(config.creatorName.trim() && fixture && !launching);
+
   const launch = async () => {
-    setStatus("Launching Creator Cup room...");
-    setCreatedRoom(null);
-    const response = await fetch("/api/creator/rooms", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...config,
-        matchId: fixture?.id
-      })
-    });
-    const data = (await response.json()) as { inviteUrl?: string; widgetUrl?: string; widgetEmbed?: string; persisted?: boolean; error?: string; message?: string };
-    if (!response.ok || !data.inviteUrl || !data.persisted) {
-      setStatus(data.error ?? data.message ?? "Creator Cup room could not be launched yet.");
+    if (!config.creatorName.trim()) {
+      setStatus({ tone: "error", message: "Add a creator name before launching the room." });
+      return;
+    }
+    if (!fixture) {
+      setStatus({ tone: "error", message: "Pick a match from the Matches tab first." });
       return;
     }
 
-    onCaptain();
-    setCreatedRoom({
-      inviteUrl: data.inviteUrl,
-      widgetUrl: data.widgetUrl,
-      widgetEmbed: data.widgetEmbed
-    });
-    setStatus("Creator Cup room persisted and ready to share.");
+    setLaunching(true);
+    setStatus({ tone: "info", message: "Launching Creator Cup room…" });
+    setCreatedRoom(null);
+    try {
+      const response = await fetch("/api/creator/rooms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...config,
+          matchId: fixture?.id
+        })
+      });
+      const data = (await response.json()) as { inviteUrl?: string; widgetUrl?: string; widgetEmbed?: string; persisted?: boolean; error?: string; message?: string };
+      if (!response.ok || !data.inviteUrl || !data.persisted) {
+        setStatus({ tone: "error", message: data.error ?? data.message ?? "Creator Cup room could not be launched yet." });
+        return;
+      }
+
+      onCaptain();
+      setCreatedRoom({
+        inviteUrl: data.inviteUrl,
+        widgetUrl: data.widgetUrl,
+        widgetEmbed: data.widgetEmbed
+      });
+      setStatus({ tone: "success", message: "Room is live and ready to share." });
+    } catch {
+      setStatus({ tone: "error", message: "Network error while launching. Try again." });
+    } finally {
+      setLaunching(false);
+    }
   };
 
   return (
@@ -1931,31 +1966,49 @@ function CreatorScreen({
             <CardDescription>Configure the room fans join from stream chat, social posts, or an embedded widget.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <CreatorInput label="Creator name" value={config.creatorName} onChange={(creatorName) => onConfig({ ...config, creatorName })} />
-            <CreatorInput label="Handle" value={config.handle} onChange={(handle) => onConfig({ ...config, handle })} />
-            <CreatorInput label="Sponsor" value={config.sponsor} onChange={(sponsor) => onConfig({ ...config, sponsor })} />
-            <CreatorInput label="Invite code" value={config.inviteCode} onChange={(inviteCode) => onConfig({ ...config, inviteCode })} />
+            <CreatorInput label="Creator name" placeholder="e.g. Pitchside FC" value={config.creatorName} onChange={(creatorName) => onConfig({ ...config, creatorName })} />
+            <CreatorInput label="Handle" placeholder="@pitchsidefc" value={config.handle} onChange={(handle) => onConfig({ ...config, handle })} />
+            <CreatorInput label="Sponsor (optional)" placeholder="e.g. Northgate Sports" value={config.sponsor} onChange={(sponsor) => onConfig({ ...config, sponsor })} />
+            <CreatorInput label="Invite code (optional)" placeholder="auto-generated if blank" value={config.inviteCode} onChange={(inviteCode) => onConfig({ ...config, inviteCode })} />
             <div>
               <label className="text-xs font-bold text-white/60">Theme color</label>
               <div className="mt-1 flex gap-2">
-                {["#C60B1E", "#22D391", "#FFD166", "#1F4E9E", "#10231E"].map((color) => (
+                {["#1570EF", "#21E6A3", "#FF3B30", "#8B5CFF", "#F59E0B"].map((color) => (
                   <button
                     key={color}
-                    aria-label={color}
-                    className={cn("h-10 w-10 rounded-2xl border-2 shadow-[0_12px_28px_rgba(0,0,0,0.22)] transition hover:-translate-y-0.5", config.themeColor === color ? "border-white ring-2 ring-[#22D391]/[0.35]" : "border-white/[0.06]")}
+                    aria-label={`Theme color ${color}`}
+                    className={cn("h-10 w-10 rounded-2xl border-2 shadow-[0_12px_28px_rgba(4,12,24,0.3)] transition hover:-translate-y-0.5", config.themeColor === color ? "border-white ring-2 ring-electric/[0.4]" : "border-white/[0.08]")}
                     style={{ backgroundColor: color }}
                     onClick={() => onConfig({ ...config, themeColor: color })}
                   />
                 ))}
               </div>
             </div>
-            <Button className="w-full" variant="pulse" onClick={launch}>
+            <Button className="w-full" variant="default" onClick={launch} disabled={!canLaunch}>
               <Bolt className="mr-2 h-4 w-4" />
-              Launch Creator Cup room
+              {launching ? "Launching…" : "Launch Creator Cup room"}
             </Button>
-            {status && <p className="break-all rounded-2xl border border-[#22D391]/30 bg-[#22D391]/[0.12] p-3 text-sm font-semibold text-[#8AF2C9]">{status}</p>}
+            {!config.creatorName.trim() || !fixture ? (
+              <p className="text-xs font-semibold text-white/[0.5]">
+                {!fixture ? "Open the Matches tab and pick a fixture to enable launch." : "Add a creator name to enable launch."}
+              </p>
+            ) : null}
+            {status && (
+              <p
+                className={cn(
+                  "break-words rounded-2xl border p-3 text-sm font-semibold",
+                  status.tone === "error"
+                    ? "border-[#FF3B30]/30 bg-[#FF3B30]/[0.12] text-[#FF9E97]"
+                    : status.tone === "success"
+                      ? "border-neon/30 bg-neon/[0.12] text-[#7BF0CC]"
+                      : "border-electric/30 bg-electric/[0.12] text-[#9EC4FF]"
+                )}
+              >
+                {status.message}
+              </p>
+            )}
             {createdRoom && (
-              <div className="grid gap-2 rounded-2xl border border-white/[0.06] bg-white/[0.06] p-3 text-sm font-semibold text-white/70 sm:grid-cols-2">
+              <div className="grid gap-2 rounded-2xl border border-white/[0.08] bg-white/[0.05] p-3 text-sm font-semibold text-white/70 sm:grid-cols-2">
                 <a className="rounded-xl bg-white/10 px-3 py-2 text-center text-white transition hover:bg-white/[0.16]" href={createdRoom.inviteUrl}>
                   Open invite
                 </a>
@@ -1969,29 +2022,46 @@ function CreatorScreen({
           </CardContent>
         </Card>
         <Card className="glass-card overflow-hidden border-0">
-          <CardHeader style={{ background: `linear-gradient(135deg, ${config.themeColor}, #02070a)` }} className="text-white">
+          <CardHeader style={{ background: `linear-gradient(135deg, ${config.themeColor}, #050F1D)` }} className="text-white">
             <div className="flex items-center gap-3">
-              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/[0.18] text-sm font-black ring-1 ring-white/20">CC</span>
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/[0.18] font-anybody text-sm font-black ring-1 ring-white/20">
+                {config.creatorName ? config.creatorName.slice(0, 2).toUpperCase() : "CC"}
+              </span>
               <div>
-                <CardTitle>{config.creatorName}</CardTitle>
-                <CardDescription className="text-white/70">{config.handle}</CardDescription>
+                <CardTitle>{config.creatorName || "Your Creator Cup"}</CardTitle>
+                <CardDescription className="text-white/70">{config.handle || "@handle"}</CardDescription>
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-3 p-4">
-            <p className="text-sm font-semibold text-white/[0.62]">Sponsored room for {fixture?.home.shortName ?? "HOME"} vs {fixture?.away.shortName ?? "AWAY"}</p>
-            <div className="rounded-2xl border border-white/[0.06] bg-white/[0.06] p-4">
-              <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#ffcc00]">Sponsored prediction card</p>
-              <p className="mt-2 text-lg font-black text-white">Will the next market reaction favor the team pressing higher?</p>
-              <p className="mt-3 text-xs text-white/[0.56]">Presented by {config.sponsor}</p>
+            <p className="text-sm font-semibold text-white/[0.62]">
+              {fixture ? `Branded room for ${fixture.home.shortName} vs ${fixture.away.shortName}` : "Select a match, then launch to brand its room."}
+            </p>
+            <div className="rounded-2xl border border-white/[0.08] bg-white/[0.05] p-4">
+              <p className="font-data text-xs font-bold uppercase tracking-[0.14em] text-neon">Sample prediction card</p>
+              <p className="mt-2 font-anybody text-lg font-extrabold text-white">Which side will the next market reaction favor?</p>
+              {config.sponsor ? (
+                <p className="mt-3 text-xs text-white/[0.56]">Presented by {config.sponsor}</p>
+              ) : (
+                <p className="mt-3 text-xs text-white/[0.42]">Add a sponsor to show a presented-by line</p>
+              )}
             </div>
-            <div className="overflow-x-auto break-all rounded-2xl border border-white/[0.06] bg-[#02070a]/75 p-3 font-mono text-xs text-white/[0.62]">
-              {createdRoom?.widgetEmbed ?? `<iframe src="https://matchpulse.arena/widget/${config.inviteCode}" width="360" height="640"></iframe>`}
-            </div>
+            {createdRoom?.widgetEmbed ? (
+              <div>
+                <p className="mb-1.5 text-xs font-bold text-white/60">Embed code</p>
+                <div className="overflow-x-auto break-all rounded-2xl border border-white/[0.08] bg-navy-deep/70 p-3 font-mono text-xs text-white/[0.68]">
+                  {createdRoom.widgetEmbed}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-white/[0.12] bg-white/[0.03] p-3 text-xs font-semibold text-white/[0.5]">
+                Launch the room to generate a live invite link and an embeddable widget snippet.
+              </div>
+            )}
             <div className="grid gap-2 text-center text-xs font-bold text-white/70 sm:grid-cols-3">
-              <div className="rounded-2xl bg-white/[0.06] p-3 ring-1 ring-white/[0.06]">Live TxLINE fixture</div>
-              <div className="rounded-2xl bg-white/[0.06] p-3 ring-1 ring-white/[0.06]">Wallet signed room</div>
-              <div className="rounded-2xl bg-white/[0.06] p-3 ring-1 ring-white/[0.06]">Embeddable widget</div>
+              <div className="rounded-2xl bg-white/[0.05] p-3 ring-1 ring-white/[0.08]">Live TxLINE fixture</div>
+              <div className="rounded-2xl bg-white/[0.05] p-3 ring-1 ring-white/[0.08]">Wallet-signed room</div>
+              <div className="rounded-2xl bg-white/[0.05] p-3 ring-1 ring-white/[0.08]">Embeddable widget</div>
             </div>
           </CardContent>
         </Card>
@@ -2000,20 +2070,21 @@ function CreatorScreen({
   );
 }
 
-function CreatorInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+function CreatorInput({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
   return (
     <label className="block">
       <span className="text-xs font-bold text-white/60">{label}</span>
       <input
         value={value}
+        placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-1 h-12 w-full rounded-2xl border border-white/[0.06] bg-white/[0.06] px-3 text-sm font-semibold text-white outline-none ring-[#22D391]/20 transition placeholder:text-white/30 focus:border-[#22D391]/50 focus:ring-4"
+        className="mt-1 h-12 w-full rounded-2xl border border-white/[0.1] bg-white/[0.05] px-3 text-sm font-semibold text-white outline-none ring-electric/25 transition placeholder:text-white/30 focus:border-electric/50 focus:ring-4"
       />
     </label>
   );
 }
 
-function AnalyticsScreen({ users, events }: { users: LeaderboardUser[]; events: MatchEvent[] }) {
+function AnalyticsScreen({ users, events, currentUserId }: { users: LeaderboardUser[]; events: MatchEvent[]; currentUserId: string }) {
   const highImpact = events.filter((event) => event.impact === "high").length;
   const activeFans = users.length;
   const scoringFans = users.filter((user) => user.points > 0).length;
@@ -2037,7 +2108,7 @@ function AnalyticsScreen({ users, events }: { users: LeaderboardUser[]; events: 
           </CardHeader>
           <CardContent className="space-y-2">
             {users.slice(0, 4).map((user, index) => (
-              <LeaderboardRow key={user.id} user={user} rank={index + 1} compact />
+              <LeaderboardRow key={user.id} user={user} rank={index + 1} compact currentUserId={currentUserId} />
             ))}
           </CardContent>
         </Card>
@@ -2047,15 +2118,19 @@ function AnalyticsScreen({ users, events }: { users: LeaderboardUser[]; events: 
             <CardDescription>Built from score events and sentiment deltas.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
-            {events.slice(0, 5).map((event) => (
-              <div key={event.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.06] p-3 transition hover:bg-white/[0.105]">
-                <div className="min-w-0">
-                  <p className="truncate font-black text-white">{event.title}</p>
-                  <p className="text-xs text-white/[0.52]">{event.minute}&apos; / {event.impact} impact</p>
+            {events.length ? (
+              events.slice(0, 5).map((event) => (
+                <div key={event.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.05] p-3 transition hover:bg-white/[0.09]">
+                  <div className="min-w-0">
+                    <p className="truncate font-black text-white">{event.title}</p>
+                    <p className="text-xs text-white/[0.52]">{event.minute}&apos; / {event.impact} impact</p>
+                  </div>
+                  <Badge className="shrink-0" variant={event.impact === "high" ? "live" : "secondary"}>{event.type.replace("_", " ")}</Badge>
                 </div>
-                <Badge className="shrink-0" variant={event.impact === "high" ? "live" : "secondary"}>{event.type.replace("_", " ")}</Badge>
-              </div>
-            ))}
+              ))
+            ) : (
+              <p className="rounded-2xl border border-white/[0.08] bg-white/[0.05] p-4 text-sm text-white/[0.56]">Exciting moments appear as TxLINE score events arrive in the live room.</p>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -2067,10 +2142,10 @@ function Metric({ title, value, helper }: { title: string; value: string; helper
   return (
     <Card className="glass-card-soft overflow-hidden border-0">
       <CardContent className="p-4">
-        <div className="mb-4 h-1 w-12 rounded-full bg-[linear-gradient(90deg,#22D391,#FFD166)]" />
+        <div className="mb-4 h-1 w-12 rounded-full bg-[linear-gradient(90deg,#1570EF,#21E6A3)]" />
         <p className="text-sm font-bold text-white/[0.58]">{title}</p>
-        <p className="mt-2 text-3xl font-black tabular-nums text-white">{value}</p>
-        <p className="mt-1 text-xs font-semibold text-[#80ffb4]">{helper}</p>
+        <p className="mt-2 font-data text-3xl font-black text-white">{value}</p>
+        <p className="mt-1 text-xs font-semibold text-neon">{helper}</p>
       </CardContent>
     </Card>
   );
@@ -2181,13 +2256,13 @@ function TechScreen() {
 
 function SectionHeader({ icon: Icon, title, description }: { icon: typeof Activity; title: string; description: string }) {
   return (
-    <div className="glass-card-soft rounded-[1.35rem] p-4">
+    <div className="glass-card-soft rounded-2xl p-4">
       <div className="flex items-start gap-3">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#22D391]/[0.15] ring-1 ring-[#22D391]/25">
-          <Icon className="h-5 w-5 text-[#80ffb4]" />
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-neon/[0.15] ring-1 ring-neon/25">
+          <Icon className="h-5 w-5 text-neon" />
         </span>
         <div className="min-w-0">
-          <h1 className="text-xl font-black text-white sm:text-2xl">{title}</h1>
+          <h1 className="font-anybody text-xl font-black tracking-tight text-white sm:text-2xl">{title}</h1>
           <p className="mt-1 text-sm leading-6 text-white/[0.58]">{description}</p>
         </div>
       </div>
@@ -2208,7 +2283,7 @@ function MobileTabs({ current, onChange }: { current: Screen; onChange: (screen:
   ];
 
   return (
-    <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.08] bg-[#02070a]/92 px-2 pt-2 shadow-[0_-8px_30px_-12px_rgba(0,0,0,0.9)] backdrop-blur-2xl backdrop-saturate-150 lg:hidden">
+    <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.08] bg-[#081A2F]/[0.92] px-2 pt-2 shadow-[0_-8px_30px_-12px_rgba(4,12,24,0.9)] backdrop-blur-2xl backdrop-saturate-150 lg:hidden">
       <div className="scrollbar-none mx-auto flex snap-x gap-1 overflow-x-auto pb-0.5 md:justify-center">
         {items.map((item) => {
           const Icon = item.icon;
@@ -2217,13 +2292,13 @@ function MobileTabs({ current, onChange }: { current: Screen; onChange: (screen:
             <button
               key={item.id}
               className={cn(
-                "flex min-h-[52px] w-[19vw] max-w-[92px] shrink-0 snap-start flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[10px] font-semibold leading-none text-white/[0.56] transition hover:bg-white/10 hover:text-white min-[380px]:text-[11px] md:w-[86px]",
-                active && "bg-white/[0.12] font-bold text-[#8affbf] ring-1 ring-white/[0.08]"
+                "flex min-h-[52px] w-[19vw] max-w-[92px] shrink-0 snap-start flex-col items-center justify-center gap-1 rounded-2xl px-1 py-2 text-[10px] font-semibold leading-none text-white/[0.56] transition hover:bg-white/[0.08] hover:text-white min-[380px]:text-[11px] md:w-[86px]",
+                active && "bg-electric/[0.16] font-bold text-electric-soft shadow-[inset_0_0_0_1px_rgba(21,112,239,0.35)]"
               )}
               onClick={() => onChange(item.id)}
               aria-current={active ? "page" : undefined}
             >
-              <Icon className={cn("h-[18px] w-[18px]", active && "text-[#8affbf]")} />
+              <Icon className={cn("h-[18px] w-[18px]", active && "text-electric-soft")} />
               <span className="max-w-full truncate">{item.label}</span>
             </button>
           );

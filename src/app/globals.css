@@ -5,26 +5,26 @@
 @layer base {
   :root {
     color-scheme: dark;
-    --background: 210 70% 3%;
+    --background: 209 72% 11%;
     --foreground: 210 40% 98%;
-    --card: 214 48% 7%;
+    --card: 210 60% 13%;
     --card-foreground: 210 40% 98%;
-    --popover: 214 48% 7%;
+    --popover: 210 62% 12%;
     --popover-foreground: 210 40% 98%;
-    --primary: 151 72% 48%;
-    --primary-foreground: 210 70% 4%;
-    --secondary: 213 40% 12%;
+    --primary: 214 87% 51%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 46% 18%;
     --secondary-foreground: 210 34% 92%;
-    --muted: 213 38% 10%;
-    --muted-foreground: 218 16% 62%;
-    --accent: 45 96% 58%;
-    --accent-foreground: 210 70% 4%;
-    --destructive: 4 100% 60%;
+    --muted: 210 44% 15%;
+    --muted-foreground: 213 22% 68%;
+    --accent: 161 79% 52%;
+    --accent-foreground: 209 72% 8%;
+    --destructive: 3 100% 59%;
     --destructive-foreground: 0 0% 100%;
-    --border: 222 28% 16%;
-    --input: 222 28% 16%;
-    --ring: 151 90% 44%;
-    --radius: 1.25rem;
+    --border: 210 40% 22%;
+    --input: 210 40% 22%;
+    --ring: 214 87% 55%;
+    --radius: 1rem;
   }
 
   * {
@@ -34,10 +34,9 @@
   body {
     @apply bg-background text-foreground;
     background:
-      linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-      linear-gradient(180deg, rgba(34, 211, 145, 0.08) 0%, rgba(34, 211, 145, 0.015) 28%, transparent 60%),
-      linear-gradient(180deg, #02070a 0%, #07110f 42%, #03070b 100%);
-    background-size: 72px 72px, auto, auto;
+      radial-gradient(circle at 78% 6%, rgba(21, 112, 239, 0.14) 0%, transparent 42%),
+      radial-gradient(circle at 8% 96%, rgba(33, 230, 163, 0.1) 0%, transparent 40%),
+      linear-gradient(180deg, #081A2F 0%, #061627 46%, #050F1D 100%);
     background-attachment: fixed;
     min-height: 100vh;
     min-height: 100svh;
@@ -59,12 +58,12 @@
   }
 
   ::selection {
-    background: rgba(0, 230, 118, 0.3);
+    background: rgba(33, 230, 163, 0.28);
     color: #eafff4;
   }
 
   :focus-visible {
-    outline: 2px solid rgba(0, 230, 118, 0.9);
+    outline: 2px solid rgba(21, 112, 239, 0.9);
     outline-offset: 3px;
   }
 }
@@ -74,10 +73,15 @@
     text-wrap: balance;
   }
 
+  .font-data {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
   .pulse-grid {
     background-image:
-      linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+      linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
     background-size: 28px 28px;
   }
 
@@ -88,26 +92,10 @@
   .arena-shell {
     position: relative;
     background:
-      linear-gradient(90deg, rgba(255, 255, 255, 0.026) 1px, transparent 1px),
-      linear-gradient(180deg, rgba(34, 211, 145, 0.08) 0%, rgba(34, 211, 145, 0.015) 28%, transparent 60%),
-      linear-gradient(180deg, #02070a 0%, #07110f 42%, #03070b 100%);
-    background-size: 72px 72px, auto, auto;
+      radial-gradient(circle at 78% 6%, rgba(21, 112, 239, 0.14) 0%, transparent 42%),
+      radial-gradient(circle at 8% 96%, rgba(33, 230, 163, 0.1) 0%, transparent 40%),
+      linear-gradient(180deg, #081A2F 0%, #061627 46%, #050F1D 100%);
     min-height: 100svh;
-  }
-
-  .arena-shell::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    opacity: 0.035;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  }
-
-  .arena-shell > * {
-    position: relative;
-    z-index: 1;
   }
 
   .scrollbar-none {
@@ -118,44 +106,54 @@
     display: none;
   }
 
+  /* Level 1 — cards */
   .glass-card {
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
     background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 40%),
-      linear-gradient(145deg, rgba(8, 18, 18, 0.96), rgba(4, 10, 14, 0.94));
-    box-shadow: 0 28px 90px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(22px);
+      linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 42%),
+      rgba(8, 26, 47, 0.62);
+    box-shadow: 0 24px 70px rgba(4, 12, 24, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(20px);
   }
 
   .glass-card-soft {
-    border: 1px solid rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 42%),
-      rgba(7, 17, 18, 0.88);
-    box-shadow: 0 20px 66px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 44%),
+      rgba(8, 26, 47, 0.48);
+    box-shadow: 0 18px 54px rgba(4, 12, 24, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.04);
     backdrop-filter: blur(16px);
   }
 
+  /* Level 2 — active / popovers */
+  .glass-panel,
   .premium-card {
-    border: 1px solid rgba(255, 255, 255, 0.09);
+    border: 1px solid rgba(255, 255, 255, 0.16);
     background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 38%),
-      linear-gradient(145deg, rgba(9, 24, 22, 0.96), rgba(5, 10, 14, 0.95));
-    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      linear-gradient(180deg, rgba(255, 255, 255, 0.07), transparent 40%),
+      rgba(9, 30, 54, 0.72);
+    box-shadow: 0 30px 84px rgba(4, 12, 24, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(40px);
   }
 
-  .live-dot {
-    position: relative;
+  .glow-ring-electric {
+    box-shadow: 0 0 0 1px rgba(21, 112, 239, 0.45), 0 0 22px rgba(21, 112, 239, 0.32);
   }
 
+  .glow-ring-neon {
+    box-shadow: 0 0 0 1px rgba(33, 230, 163, 0.5), 0 0 22px rgba(33, 230, 163, 0.32);
+  }
+
+  /* Red broadcast LIVE indicator */
   .live-dot::before {
     content: "";
+    display: inline-block;
     width: 0.52rem;
     height: 0.52rem;
     border-radius: 999px;
-    background: #22D391;
-    box-shadow: 0 0 0 0 rgba(0, 230, 118, 0.58);
-    animation: livePulse 1.7s infinite;
+    background: #FF3B30;
+    box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.6);
+    animation: livePulse 1.6s infinite;
   }
 
   .shimmer {
@@ -168,7 +166,7 @@
     position: absolute;
     inset: 0;
     transform: translateX(-120%);
-    background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.18), transparent 65%);
+    background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.16), transparent 65%);
     animation: shimmer 2.7s infinite;
   }
 
@@ -177,11 +175,11 @@
   }
 
   .float-in {
-    animation: floatIn 520ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+    animation: floatIn 480ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
   }
 
   .momentum-wave {
-    animation: waveDrift 8s linear infinite;
+    animation: waveDrift 8s ease-in-out infinite;
   }
 
   .pulse-track {
@@ -196,21 +194,17 @@
     min-height: 44px;
     min-width: 44px;
   }
-
-  .reduced-motion-safe {
-    transform: translateZ(0);
-  }
 }
 
 @keyframes livePulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(0, 230, 118, 0.58);
+    box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.6);
   }
   70% {
-    box-shadow: 0 0 0 10px rgba(0, 230, 118, 0);
+    box-shadow: 0 0 0 9px rgba(255, 59, 48, 0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(0, 230, 118, 0);
+    box-shadow: 0 0 0 0 rgba(255, 59, 48, 0);
   }
 }
 
@@ -249,11 +243,11 @@
 }
 
 @keyframes waveDrift {
-  from {
-    transform: translateX(-18px);
+  0%, 100% {
+    transform: translateX(-14px);
   }
-  to {
-    transform: translateX(18px);
+  50% {
+    transform: translateX(14px);
   }
 }
 
@@ -280,17 +274,6 @@
   100% {
     transform: scale(1);
     filter: brightness(1);
-  }
-}
-
-@keyframes energyPulse {
-  0%, 100% {
-    opacity: 0.7;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.15);
   }
 }
 
