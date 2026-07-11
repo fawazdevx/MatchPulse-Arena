@@ -20,7 +20,7 @@ export default async function MatchPulseWidgetPage({ params }: { params: { invit
 
   if (!room) {
     return (
-      <main className="grid min-h-screen place-items-center bg-[#02070a] p-3 text-white">
+      <main className="grid min-h-screen place-items-center bg-[#081A2F] p-3 text-white">
         <section className="w-full max-w-sm rounded-[1.5rem] border border-white/10 bg-white/[0.08] p-5 text-center">
           <Badge variant="creator">MatchPulse Arena</Badge>
           <h1 className="mt-4 text-xl font-black">Widget is not live yet</h1>
@@ -44,7 +44,7 @@ export default async function MatchPulseWidgetPage({ params }: { params: { invit
   const clockLabel = snapshot ? snapshot.clock.label : "Awaiting live snapshot";
 
   return (
-    <main className="min-h-screen bg-[#02070a] p-3 text-white">
+    <main className="min-h-screen bg-[#081A2F] p-3 text-white">
       <section className="mx-auto flex min-h-[calc(100vh-1.5rem)] max-w-sm flex-col overflow-hidden rounded-[1.5rem] border border-white/10 bg-[linear-gradient(145deg,rgba(8,18,18,0.96),rgba(4,10,14,0.94))] shadow-[0_24px_70px_rgba(0,0,0,0.42)]">
         <div className="relative overflow-hidden p-4">
           <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(180deg,rgba(34,211,145,0.1),transparent_48%)] bg-[length:56px_56px,auto]" />
