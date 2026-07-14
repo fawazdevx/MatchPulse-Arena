@@ -14,7 +14,7 @@ Watch any of the 104 World Cup matches, read live scores and *real-time market s
 5. **Create a Creator Cup room** → shareable invite page + embeddable widget for a sponsor/creator.
 
 ### Submission links
-- **Live demo:** _add Vercel URL_
+- **Live demo:** https://matchpulsearena.vercel.com
 - **Demo video:** _add Loom/YouTube link_
 - **Repo:** https://github.com/fawazdevx/MatchPulse-Arena
 - **Powered by:** TxLINE (live sports data + consensus odds) · Solana (wallet sign-in)
