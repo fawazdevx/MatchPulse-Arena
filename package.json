@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
+    "postinstall": "prisma generate",
     "test:auth": "node --experimental-strip-types --test src/services/auth/wallet-session.test.ts",
     "test:rules": "node --experimental-strip-types --test src/services/game/rules.test.ts",
     "test:game": "node --experimental-strip-types --test src/services/game/rules.test.ts src/services/game/prediction-engine.test.ts src/services/auth/wallet-session.test.ts",
