@@ -28,7 +28,11 @@ function widgetEmbed(origin: string, inviteCode: string) {
 }
 
 export async function POST(request: Request) {
-  const payload = await request.json();
+  const payload = await request.json().catch(() => null);
+  if (!payload || typeof payload !== "object") {
+    return jsonError("Invalid JSON body.", 400);
+  }
+
   const origin = new URL(request.url).origin;
   const session = await getSessionFromRequest(request).catch(() => null);
   const creatorName = sanitizeText(payload.creatorName, "Creator Cup");

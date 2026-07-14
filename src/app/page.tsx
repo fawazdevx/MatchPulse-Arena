@@ -43,6 +43,7 @@ import { TeamCrest } from "@/components/TeamCrest";
 import { HomeScreen, type SetupState } from "@/components/arena/HomeScreen";
 import { badgeById, badges } from "@/services/game/badges";
 import { txLineEndpoints } from "@/services/txline/endpoints";
+import { useMatchNotifications } from "@/hooks/useMatchNotifications";
 
 type Screen = "home" | "room" | "leaderboard" | "passport" | "creator" | "analytics" | "replay" | "tech";
 type PredictionState = "waiting" | "active" | "answered" | "locked" | "resolved";
@@ -328,6 +329,8 @@ export default function MatchPulseArena() {
   const [walletError, setWalletError] = useState<string | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
   const liveStartedForRef = useRef<string | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const matchNotifications = useMatchNotifications();
 
   const selectedFixture = useMemo(
     () => fixtures.find((fixture) => fixture.id === selectedMatchId) ?? snapshot?.fixture ?? fixtures[0],
@@ -356,6 +359,8 @@ export default function MatchPulseArena() {
   const selectedRoomId = roomIdForMatch(selectedFixture?.id);
 
   const loadSnapshot = useCallback(async (matchId: string) => {
+    if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
+    reconnectTimerRef.current = null;
     sourceRef.current?.close();
     sourceRef.current = null;
     liveStartedForRef.current = null;
@@ -602,6 +607,8 @@ export default function MatchPulseArena() {
     (tick: ReplayTick) => {
       if (!selectedFixture) return;
 
+      matchNotifications.notifyFromTick(tick, selectedFixture);
+
       setLiveUpdateAt(Date.now());
       window.setTimeout(() => setLiveUpdateAt(null), 2600);
       setLastTick(tick);
@@ -642,7 +649,7 @@ export default function MatchPulseArena() {
         }, 900);
       }
     },
-    [activePrediction, predictionState, resolvePrediction, selectedFixture, selectedOption]
+    [activePrediction, matchNotifications, predictionState, resolvePrediction, selectedFixture, selectedOption]
   );
 
   const startStream = useCallback((mode: "live" | "replay" = "live") => {
@@ -659,14 +666,27 @@ export default function MatchPulseArena() {
       applyTick(JSON.parse((message as MessageEvent).data) as ReplayTick);
     });
     source.addEventListener("complete", () => {
-      setStreamStatus("complete");
-      setIsReplaying(false);
       source.close();
+      // Live streams close gracefully at the serverless duration cap. Reconnect
+      // so the match room keeps updating; replays are genuinely finished.
+      if (mode === "live" && sourceRef.current === source && liveStartedForRef.current === selectedFixture.id) {
+        reconnectTimerRef.current = window.setTimeout(() => startStream("live"), 1_000);
+      } else {
+        setStreamStatus("complete");
+        setIsReplaying(false);
+      }
     });
     source.addEventListener("error", () => {
-      setStreamStatus("error");
-      setIsReplaying(false);
       source.close();
+      setIsReplaying(false);
+      // Auto-retry live mode so a dropped connection (network blip, cold start,
+      // duration cap) doesn't leave the room frozen during a match.
+      if (mode === "live" && sourceRef.current === source && liveStartedForRef.current === selectedFixture.id) {
+        setStreamStatus("connected");
+        reconnectTimerRef.current = window.setTimeout(() => startStream("live"), 3_000);
+      } else {
+        setStreamStatus("error");
+      }
     });
   }, [applyTick, selectedFixture]);
 
@@ -682,7 +702,10 @@ export default function MatchPulseArena() {
   }, [selectedFixture, setupState, snapshot, startLive]);
 
   useEffect(() => {
-    return () => sourceRef.current?.close();
+    return () => {
+      if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
+      sourceRef.current?.close();
+    };
   }, []);
 
   useEffect(() => {
@@ -748,6 +771,12 @@ export default function MatchPulseArena() {
 
       setWalletUser(verifyPayload.user);
       setWalletStatus("connected");
+      // Wallet connect is a real user gesture — the only reliable moment to ask
+      // for notification permission. Fans then get goal/red-card alerts when they
+      // tab away mid-match.
+      if (matchNotifications.canPrompt) {
+        void matchNotifications.requestPermission();
+      }
       setFan((current) => ({
         ...current,
         points: verifyPayload.user?.points ?? current.points,
@@ -780,6 +809,8 @@ export default function MatchPulseArena() {
   };
 
   const refreshLiveData = async () => {
+    if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
+    reconnectTimerRef.current = null;
     sourceRef.current?.close();
     setResolvedPredictions([]);
     setToasts([]);

@@ -5,7 +5,11 @@ import { getSessionFromRequest } from "@/services/auth/wallet-session";
 import type { MatchEvent, PredictionCard } from "@/lib/types";
 
 export async function POST(request: Request) {
-  const payload = await request.json();
+  const payload = await request.json().catch(() => null);
+  if (!payload || typeof payload !== "object") {
+    return jsonError("Invalid JSON body.", 400);
+  }
+
   const session = await getSessionFromRequest(request).catch(() => null);
 
   if (!session) {
