@@ -386,57 +386,19 @@ export async function persistRoomUpdate(
   return { persisted: true };
 }
 
+// When the prediction is not yet resolved in Postgres we cannot authoritatively
+// score the answer server-side. We deliberately do NOT recompute points from the
+// client-supplied `prediction.resolved` / `fan` payload: that input is
+// attacker-controlled and echoing it back as `serverCalculated: true` would let a
+// crafted request self-report any score. Instead we return a non-scored "pending"
+// response so the client keeps its own optimistic local score until an
+// authoritative, TxLINE-resolved result is available.
 function calculateServerAnswerFallback(input: PersistAnswerInput, reason?: string) {
-  if (!input.prediction?.resolved) {
-    return {
-      persisted: false,
-      serverCalculated: false,
-      reason: reason ?? "Prediction has not been resolved by a TxLINE update yet."
-    };
-  }
-
-  const fan = input.fan ?? {
-    points: 0,
-    streak: 0,
-    bestStreak: 0,
-    badges: [] as BadgeId[],
-    correct: 0,
-    answered: 0,
-    oddsCorrect: 0,
-    momentumCorrect: 0
-  };
-  const correct = input.prediction.resolved.optionId === input.optionId;
-  const nextStreak = correct ? fan.streak + 1 : 0;
-  const pointsAwarded = scorePredictionResult({
-    correct,
-    nextStreak,
-    answeredAtMs: input.answeredAtMs,
-    eventImpact: input.resolvingEvent?.impact,
-    eventMinute: input.resolvingEvent?.minute
-  });
-  const badgesUnlocked = getBadgeUnlocks({
-    currentBadges: fan.badges,
-    correct,
-    previousCorrect: fan.correct,
-    nextStreak,
-    kind: input.prediction.kind,
-    oddsCorrect: fan.oddsCorrect,
-    momentumCorrect: fan.momentumCorrect,
-    event: input.resolvingEvent ? { type: input.resolvingEvent.type, minute: input.resolvingEvent.minute } : undefined
-  });
-
   return {
     persisted: false,
-    serverCalculated: true,
-    correct,
-    pointsAwarded,
-    nextStreak,
-    nextPoints: fan.points + pointsAwarded,
-    nextBestStreak: Math.max(fan.bestStreak, nextStreak),
-    badgesUnlocked,
-    txlineEventId: input.prediction.resolved.eventId,
-    explanation: input.prediction.resolved.explanation,
-    reason
+    serverCalculated: false,
+    pending: true,
+    reason: reason ?? "Prediction has not been resolved by a TxLINE update yet."
   };
 }
 

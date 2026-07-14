@@ -1,8 +1,35 @@
-# MatchPulse Arena
+# MatchPulse Arena ⚽
 
-MatchPulse Arena is a World Cup second-screen fan dApp powered by TxLINE live match data. Fans can browse live match rooms without a wallet, then connect Phantom or Solflare to persist their profile, points, streaks, badges, leaderboard position, and Creator Cup rooms.
+**A World Cup second-screen fan game powered by live TxLINE data, with sign-in on Solana.**
 
-This is not a betting app. There are no deposits, wagers, payouts, financial rewards, betting slips, or gambling calls to action. Odds movement is translated into fan-facing momentum, pressure, and market reaction signals.
+Watch any of the 104 World Cup matches, read live scores and *real-time market sentiment* (odds translated into fan-facing momentum & pressure), and make no-money micro-predictions off the live feed. Build streaks, earn badges, climb a live leaderboard. Creators spin up branded watch-rooms with a shareable invite and an embeddable widget.
+
+> **Not a betting app.** No deposits, wagers, payouts, or gambling CTAs. Odds movement is surfaced only as momentum / pressure / market-reaction signals for fans.
+
+### 30-second tour
+1. **Browse live matches** — no wallet needed. Fixtures stream from TxLINE.
+2. **Open a match room** → live score, market pulse, and event feed over SSE.
+3. **Answer a prediction card** generated from the live TxLINE feed.
+4. **Connect Phantom / Solflare** (SIWS signature) → points, streaks, and badges persist to your profile.
+5. **Create a Creator Cup room** → shareable invite page + embeddable widget for a sponsor/creator.
+
+### Submission links
+- **Live demo:** _add Vercel URL_
+- **Demo video:** _add Loom/YouTube link_
+- **Repo:** https://github.com/fawazdevx/MatchPulse-Arena
+- **Powered by:** TxLINE (live sports data + consensus odds) · Solana (wallet sign-in)
+
+### TxLINE endpoints used
+| Purpose | TxLINE endpoint |
+| --- | --- |
+| Fixtures list | `GET /api/fixtures/snapshot` |
+| Live score snapshot | `GET /api/scores/snapshot/{fixtureId}` |
+| Live odds / sentiment | `GET /api/odds/snapshot/{fixtureId}` |
+| Live score stream | `GET /api/scores/stream` |
+| Historical replay | `GET /api/scores/historical/{fixtureId}` |
+
+Credentials never reach the browser — every TxLINE call is proxied server-side (see [TxLINE Architecture](#txline-architecture)).
+
 
 ## Stack
 

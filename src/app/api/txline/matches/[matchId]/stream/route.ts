@@ -9,6 +9,14 @@ import { getRuntimeFixture } from "@/services/txline/runtime-cache";
 const encoder = new TextEncoder();
 const livePollMs = 8_000;
 
+// Vercel caps serverless function duration (60s Hobby, up to 300s Pro). We tell
+// Vercel to allow the longest window it can, then close the stream gracefully a
+// few seconds BEFORE that cap so the client receives a clean `complete` event and
+// reconnects, instead of the platform killing the socket mid-tick.
+export const maxDuration = 60;
+export const dynamic = "force-dynamic";
+const streamSoftDeadlineMs = (maxDuration - 5) * 1_000;
+
 function encodeEvent(event: string, payload: unknown) {
   return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
 }
@@ -32,8 +40,9 @@ async function* liveSnapshotTicks(adapter: TxLineAdapter, matchId: string, signa
   let activePrediction: PredictionCard | null = null;
   let lastSignature = "";
   let lastSnapshot: MatchSnapshot | null = null;
+  const startedAt = Date.now();
 
-  while (!signal.aborted) {
+  while (!signal.aborted && Date.now() - startedAt < streamSoftDeadlineMs) {
     sequence += 1;
     let snapshot: MatchSnapshot;
 
