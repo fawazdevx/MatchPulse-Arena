@@ -14,7 +14,7 @@ Watch any of the 104 World Cup matches, read live scores and *real-time market s
 5. **Create a Creator Cup room** → shareable invite page + embeddable widget for a sponsor/creator.
 
 ### Submission links
-- **Live demo:** https://matchpulsearena.vercel.com
+- **Live demo:** https://matchpulsearena.vercel.app
 - **Demo video:** _add Loom/YouTube link_
 - **Repo:** https://github.com/fawazdevx/MatchPulse-Arena
 - **Powered by:** TxLINE (live sports data + consensus odds) · Solana (wallet sign-in)
@@ -25,7 +25,10 @@ Watch any of the 104 World Cup matches, read live scores and *real-time market s
 | Fixtures list | `GET /api/fixtures/snapshot` |
 | Live score snapshot | `GET /api/scores/snapshot/{fixtureId}` |
 | Live odds / sentiment | `GET /api/odds/snapshot/{fixtureId}` |
-| Live score stream | `GET /api/scores/stream` |
+| Live score stream | `GET /api/scores/stream?fixtureId={fixtureId}` |
+| Live odds stream | `GET /api/odds/stream?fixtureId={fixtureId}` |
+| Current score fallback | `GET /api/scores/updates/{fixtureId}` |
+| Current odds fallback | `GET /api/odds/updates/{fixtureId}` |
 | Historical replay | `GET /api/scores/historical/{fixtureId}` |
 
 Credentials never reach the browser — every TxLINE call is proxied server-side (see [TxLINE Architecture](#txline-architecture)).
@@ -56,8 +59,10 @@ The app defaults to live TxLINE mode. Without credentials, it shows a setup stat
 For persistence, run Postgres, set `DATABASE_URL`, then:
 
 ```bash
-npm run db:push
+npm run db:deploy
 ```
+
+`db:deploy` applies the committed Prisma migrations. For Supabase transaction-pooler URLs on port `6543`, the script uses session-pooler port `5432` while migrating; runtime Prisma connections retain `6543` with PgBouncer-safe settings. Use `npm run db:push` only for disposable local schema prototyping.
 
 Useful verification commands:
 
@@ -89,7 +94,7 @@ Use `/txline-activate` to activate devnet or mainnet credentials. The page creat
 TxLINE integration is isolated under `src/services/txline`:
 
 - `index.ts`: explicit adapter selection and setup errors.
-- `real-adapter.ts`: server-only TxLINE proxy adapter for fixtures, score snapshots, odds snapshots, score streams, and historical scores.
+- `real-adapter.ts`: server-only TxLINE proxy adapter for fixtures, snapshots, filtered score/odds SSE streams, current-interval fallbacks, and historical scores.
 - `mock-adapter.ts`: optional isolated local adapter, used only when `TXLINE_ADAPTER=mock`.
 - `mock-data.ts`: optional local replay data for adapter testing.
 - `endpoints.ts`: safe technical endpoint metadata for the in-app notes page.
@@ -129,6 +134,8 @@ The Prisma schema includes production dApp records for users, wallet sessions, m
 
 The app no longer seeds public production screens with hardcoded matches or leaderboard users. Badges are initialized when needed; matches and Creator Cup rooms come from live TxLINE fixtures and persisted database records.
 
+The repository includes a complete baseline migration plus incremental migrations. Run `npm run db:deploy` once against the production `DATABASE_URL` before testing wallet scoring or Creator Cup rooms.
+
 ## Live Mode vs Replay Mode
 
 Live mode:
@@ -138,6 +145,8 @@ Live mode:
 - Backend calls TxLINE server-side with `Authorization: Bearer <jwt>` and `X-Api-Token: <token>`.
 - If credentials are missing, API routes return a clear setup state.
 - The match room connects to `/api/txline/matches/:matchId/stream?mode=live`.
+- The server consumes filtered TxLINE score and odds SSE feeds directly.
+- `/scores/updates/{fixtureId}` and `/odds/updates/{fixtureId}` run in parallel as a two-second, deduplicated fallback if an upstream stream is slow to establish.
 
 Historical replay:
 

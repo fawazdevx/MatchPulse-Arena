@@ -158,6 +158,7 @@ export interface ReplayTick {
   dataQuality?: "live" | "delayed";
   txlineUpdateId?: string;
   snapshotGeneratedAt?: string;
+  clock?: MatchSnapshot["clock"];
   score?: {
     home: number;
     away: number;
@@ -165,11 +166,12 @@ export interface ReplayTick {
   sentiment: MarketSentiment;
   prediction?: PredictionCard;
   resolvedPrediction?: PredictionCard;
+  suppressPrediction?: boolean;
 }
 
 export interface TxLineAdapter {
   getFixtures(): Promise<MatchFixture[]>;
   getSnapshot(matchId: string): Promise<MatchSnapshot>;
   getReplayTicks(matchId: string): AsyncGenerator<ReplayTick>;
-  getLiveTicks?(matchId: string): AsyncGenerator<ReplayTick>;
+  getLiveTicks?(matchId: string, signal?: AbortSignal): AsyncGenerator<ReplayTick>;
 }

@@ -68,7 +68,7 @@ async function* liveSnapshotTicks(adapter: TxLineAdapter, matchId: string, signa
     };
 
     if (signature !== lastSignature || sequence === 1) {
-      await persistRoomUpdate(snapshot.fixture, roomTick, prediction, resolvedPrediction).catch(() => undefined);
+      void persistRoomUpdate(snapshot.fixture, roomTick, prediction, resolvedPrediction).catch(() => undefined);
       yield roomTick;
       lastSignature = signature;
       activePrediction = prediction;
@@ -94,20 +94,56 @@ async function* liveSnapshotTicks(adapter: TxLineAdapter, matchId: string, signa
           label: "No major pulse movement"
         }
       };
-      const heartbeatPrediction = createPredictionFromTick(matchId, snapshot.fixture, heartbeatTick);
       const heartbeatResolvedPrediction = activePrediction ? resolvePredictionFromTick(activePrediction, heartbeatTick) : undefined;
       const heartbeatRoomTick: ReplayTick = {
         ...heartbeatTick,
-        prediction: heartbeatPrediction,
-        resolvedPrediction: heartbeatResolvedPrediction
+        resolvedPrediction: heartbeatResolvedPrediction,
+        suppressPrediction: true
       };
 
-      await persistRoomUpdate(snapshot.fixture, heartbeatRoomTick, heartbeatPrediction, heartbeatResolvedPrediction).catch(() => undefined);
+      void persistRoomUpdate(snapshot.fixture, heartbeatRoomTick, undefined, heartbeatResolvedPrediction).catch(() => undefined);
       yield heartbeatRoomTick;
-      activePrediction = heartbeatPrediction;
+      activePrediction = null;
     }
 
     await sleep(livePollMs, signal);
+  }
+}
+
+async function* liveTxLineTicks(adapter: TxLineAdapter, matchId: string, signal: AbortSignal): AsyncGenerator<ReplayTick> {
+  if (!adapter.getLiveTicks) {
+    yield* liveSnapshotTicks(adapter, matchId, signal);
+    return;
+  }
+
+  const snapshot = await adapter.getSnapshot(matchId).then(enrichSnapshotFixture).catch(() => null);
+  const fixture =
+    snapshot?.fixture ??
+    getRuntimeFixture(matchId) ??
+    (await adapter.getFixtures().catch(() => [])).find((item) => item.id === matchId) ??
+    (await getCachedFixturesFromDb()).find((item: MatchFixture) => item.id === matchId);
+
+  if (!fixture) {
+    throw new Error(`TxLINE fixture ${matchId} was not found.`);
+  }
+
+  let activePrediction: PredictionCard | null = null;
+
+  for await (const tick of adapter.getLiveTicks(matchId, signal)) {
+    if (signal.aborted) break;
+
+    const resolvedPrediction = activePrediction ? resolvePredictionFromTick(activePrediction, tick) : undefined;
+    const prediction = createPredictionFromTick(matchId, fixture, tick);
+    const roomTick: ReplayTick = {
+      ...tick,
+      dataQuality: "live",
+      prediction,
+      resolvedPrediction
+    };
+
+    void persistRoomUpdate(fixture, roomTick, prediction, resolvedPrediction).catch(() => undefined);
+    activePrediction = prediction;
+    yield roomTick;
   }
 }
 
@@ -204,7 +240,7 @@ async function* replayTicks(adapter: TxLineAdapter, matchId: string): AsyncGener
       resolvedPrediction
     };
 
-    await persistRoomUpdate(fixture, roomTick, prediction, resolvedPrediction).catch(() => undefined);
+    void persistRoomUpdate(fixture, roomTick, prediction, resolvedPrediction).catch(() => undefined);
     yield roomTick;
   }
 }
@@ -215,6 +251,11 @@ export async function GET(request: Request, context: { params: { matchId: string
 
   const stream = new ReadableStream({
     async start(controller) {
+      const streamAbort = new AbortController();
+      const abortStream = () => streamAbort.abort();
+      const deadline = setTimeout(abortStream, streamSoftDeadlineMs);
+      request.signal.addEventListener("abort", abortStream, { once: true });
+
       controller.enqueue(
         encodeEvent("connected", {
           mode,
@@ -228,29 +269,37 @@ export async function GET(request: Request, context: { params: { matchId: string
 
       try {
         const adapter = getTxLineAdapter();
-        const tickStream = mode === "replay" ? replayTicks(adapter, context.params.matchId) : liveSnapshotTicks(adapter, context.params.matchId, request.signal);
+        const tickStream = mode === "replay" ? replayTicks(adapter, context.params.matchId) : liveTxLineTicks(adapter, context.params.matchId, streamAbort.signal);
 
         for await (const tick of tickStream) {
+          if (request.signal.aborted) break;
           controller.enqueue(encodeEvent("tick", tick));
         }
 
-        controller.enqueue(
-          encodeEvent("complete", {
-            completedAt: new Date().toISOString()
-          })
-        );
+        if (!request.signal.aborted) {
+          controller.enqueue(
+            encodeEvent("complete", {
+              completedAt: new Date().toISOString()
+            })
+          );
+        }
       } catch (error) {
-        controller.enqueue(
-          encodeEvent("error", {
-            message:
-              error instanceof TxLineSetupError
-                ? "TxLINE live mode needs server credentials. Configure TXLINE_JWT and TXLINE_API_TOKEN on the server."
-                : error instanceof Error
-                  ? error.message
-                  : "Stream failed"
-          })
-        );
+        if (!request.signal.aborted) {
+          controller.enqueue(
+            encodeEvent("stream-error", {
+              message:
+                error instanceof TxLineSetupError
+                  ? "TxLINE live mode needs server credentials. Configure TXLINE_JWT and TXLINE_API_TOKEN on the server."
+                  : error instanceof Error
+                    ? error.message
+                    : "Stream failed"
+            })
+          );
+        }
       } finally {
+        clearTimeout(deadline);
+        streamAbort.abort();
+        request.signal.removeEventListener("abort", abortStream);
         controller.close();
       }
     }
@@ -260,7 +309,8 @@ export async function GET(request: Request, context: { params: { matchId: string
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive"
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no"
     }
   });
 }

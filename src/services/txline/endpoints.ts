@@ -17,15 +17,15 @@ export const txLineEndpoints = [
     label: "Score stream",
     method: "SSE",
     path: "/api/txline/matches/:matchId/stream",
-    txline: "GET /api/scores/stream",
-    use: "Updates goals, cards, corners, phase, clock, and event timeline."
+    txline: "GET /api/scores/stream?fixtureId=... + /api/scores/updates/{fixtureId}",
+    use: "Updates goals, cards, corners, phase, clock, and event timeline with a deduplicated current-interval fallback."
   },
   {
     label: "Odds stream",
     method: "SSE",
     path: "/api/txline/matches/:matchId/stream",
-    txline: "GET /api/odds/stream",
-    use: "Turns odds movement into fan-facing momentum and prediction resolution."
+    txline: "GET /api/odds/stream?fixtureId=... + /api/odds/updates/{fixtureId}",
+    use: "Turns result-market movement into fan-facing momentum with a deduplicated current-interval fallback."
   },
   {
     label: "Historical replay",
