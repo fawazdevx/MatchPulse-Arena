@@ -13,6 +13,7 @@ import { rememberRuntimeFixtures } from "@/services/txline/runtime-cache";
 import {
   txLineClockFromRecord,
   txLineEventTypeFromRecord,
+  txLineRecordHasScore,
   txLineScoreFromRecord,
   txLineTeamSideFromRecord,
   txLineUpdateIdFromRecord
@@ -469,7 +470,12 @@ export class RealTxLineAdapter implements TxLineAdapter {
           if (snapshotEventIds.delete(event.id)) continue;
 
           counter += 1;
-          score = extractScore(record);
+          // Only overwrite the running score when the record actually carries
+          // one. Clock/card/keep-alive records zero-default otherwise, wiping a
+          // real score back to 0-0 (the score would show once then vanish).
+          if (txLineRecordHasScore(record)) {
+            score = extractScore(record);
+          }
           clock = extractClock(record, clock.phase);
 
           yield {

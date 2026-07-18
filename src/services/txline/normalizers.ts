@@ -77,7 +77,7 @@ function soccerPhase(source: JsonRecord | undefined, fallback: MatchPhase): Matc
   return fallback;
 }
 
-export function txLineScoreFromRecord(source: JsonRecord | undefined) {
+function scoreRecordParts(source: JsonRecord | undefined) {
   const nestedScore =
     asRecord(source?.scoreSoccer) ??
     asRecord(source?.ScoreSoccer) ??
@@ -89,6 +89,27 @@ export function txLineScoreFromRecord(source: JsonRecord | undefined) {
   const participant2 = asRecord(nestedScore?.Participant2) ?? asRecord(nestedScore?.participant2);
   const participant1Total = asRecord(participant1?.Total) ?? asRecord(participant1?.total);
   const participant2Total = asRecord(participant2?.Total) ?? asRecord(participant2?.total);
+  return { nestedScore, participant1, participant2, participant1Total, participant2Total };
+}
+
+// A live score-stream record only sometimes carries goals — clock, card and
+// keep-alive records omit them entirely. This reports whether a record actually
+// contains a score so the live loop can skip zero-defaulting over a real score.
+export function txLineRecordHasScore(source: JsonRecord | undefined) {
+  if (!source) return false;
+  const { nestedScore, participant1, participant2, participant1Total, participant2Total } = scoreRecordParts(source);
+  return (
+    numberValue(source, ["HomeScore", "homeScore", "Participant1Score", "participant1Score", "AwayScore", "awayScore", "Participant2Score", "participant2Score"]) !== undefined ||
+    numberValue(nestedScore, ["home", "Home", "Participant1Score", "participant1Score", "away", "Away", "Participant2Score", "participant2Score"]) !== undefined ||
+    numberValue(participant1Total, ["Goals", "goals"]) !== undefined ||
+    numberValue(participant2Total, ["Goals", "goals"]) !== undefined ||
+    numberValue(participant1, ["Goals", "goals"]) !== undefined ||
+    numberValue(participant2, ["Goals", "goals"]) !== undefined
+  );
+}
+
+export function txLineScoreFromRecord(source: JsonRecord | undefined) {
+  const { nestedScore, participant1, participant2, participant1Total, participant2Total } = scoreRecordParts(source);
   const participant1Goals =
     numberValue(source, ["HomeScore", "homeScore", "Participant1Score", "participant1Score"]) ??
     numberValue(nestedScore, ["home", "Home", "Participant1Score", "participant1Score"]) ??
