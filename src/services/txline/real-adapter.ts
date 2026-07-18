@@ -724,8 +724,18 @@ function dateIsoValue(source: JsonRecord | undefined, keys: string[]) {
 
   if (raw === undefined) return undefined;
 
-  const date = typeof raw === "number" || /^\d+$/.test(raw) ? new Date(Number(raw)) : new Date(raw);
+  const date =
+    typeof raw === "number" || /^\d+$/.test(raw)
+      ? dateFromEpochValue(Number(raw))
+      : new Date(raw);
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+function dateFromEpochValue(value: number) {
+  if (!Number.isFinite(value)) return new Date(Number.NaN);
+  if (value >= 1_000_000_000_000) return new Date(value);
+  if (value >= 1_000_000_000) return new Date(value * 1000);
+  return new Date(Number.NaN);
 }
 
 function phaseValue(source: JsonRecord | undefined, fallback: MatchSnapshot["clock"]["phase"], kickoffIso?: string) {
@@ -791,7 +801,13 @@ function colorFor(name: string, side: TeamKey) {
 function recordTimestamp(source: JsonRecord | undefined) {
   const raw = stringValue(source, ["Timestamp", "timestamp", "UpdatedAt", "updatedAt", "OccurredAt", "occurredAt", "CreatedAt", "createdAt"]);
   const parsed = raw ? new Date(raw).getTime() : Number.NaN;
-  return Number.isFinite(parsed) ? parsed : numberValue(source, ["Sequence", "sequence", "seq", "Index", "index"]) ?? 0;
+  if (Number.isFinite(parsed)) return parsed;
+
+  const epoch = numberValue(source, ["Ts", "ts", "StartTime", "startTime"]);
+  const epochDate = epoch === undefined ? undefined : dateFromEpochValue(epoch);
+  if (epochDate && !Number.isNaN(epochDate.getTime())) return epochDate.getTime();
+
+  return numberValue(source, ["Sequence", "sequence", "seq", "Index", "index"]) ?? 0;
 }
 
 function latestRecord(records: JsonRecord[], matchId: string, allowMissingFixtureId: boolean) {

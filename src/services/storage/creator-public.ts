@@ -22,28 +22,30 @@ export async function getPublicCreatorRoom(inviteCode: string): Promise<PublicCr
   }
 
   const normalized = inviteCode.toUpperCase();
-  const room = await db.matchRoom.findFirst({
-    where: {
-      OR: [{ inviteCode: normalized }, { inviteCode }]
-    },
-    include: {
-      match: true,
-      creatorRoom: true,
-      leaderboard: {
-        take: 3,
-        orderBy: {
-          points: "desc"
-        },
-        include: {
-          user: {
-            include: {
-              badgeUnlocks: true
+  const room = await db.matchRoom
+    .findFirst({
+      where: {
+        OR: [{ inviteCode: normalized }, { inviteCode }]
+      },
+      include: {
+        match: true,
+        creatorRoom: true,
+        leaderboard: {
+          take: 3,
+          orderBy: {
+            points: "desc"
+          },
+          include: {
+            user: {
+              include: {
+                badgeUnlocks: true
+              }
             }
           }
         }
       }
-    }
-  });
+    })
+    .catch(() => null);
 
   if (!room?.creatorRoom || !room.match) {
     return null;
