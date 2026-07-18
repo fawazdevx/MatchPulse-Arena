@@ -11,7 +11,7 @@ export async function GET(_request: Request, context: { params: { matchId: strin
   try {
     const snapshot = await enrichSnapshotFixture(await getTxLineAdapter().getSnapshot(context.params.matchId));
     lastSnapshots.set(context.params.matchId, snapshot);
-    await upsertMatchFixture(snapshot.fixture).catch(() => undefined);
+    void upsertMatchFixture(snapshot.fixture).catch(() => undefined);
     return NextResponse.json(snapshot);
   } catch (error) {
     if (error instanceof TxLineSetupError) {

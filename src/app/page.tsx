@@ -42,6 +42,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { TeamCrest } from "@/components/TeamCrest";
 import { HomeScreen, type SetupState } from "@/components/arena/HomeScreen";
 import { badgeById, badges } from "@/services/game/badges";
+import { createPredictionFromTick } from "@/services/game/prediction-engine";
 import { txLineEndpoints } from "@/services/txline/endpoints";
 import { useMatchNotifications } from "@/hooks/useMatchNotifications";
 
@@ -240,40 +241,6 @@ function nextBadges(fan: FanState, card: PredictionCard, result: ReturnType<type
   return [...earned].filter((badge) => !fan.badges.includes(badge));
 }
 
-function predictionFromTick(tick: ReplayTick, fixture: MatchFixture): PredictionCard {
-  const trend = tick.sentiment.trend;
-  const favored = trend === "away" ? "away" : "home";
-  const lockAt = Math.max(0, tick.event.minute + 1);
-  const resolvesAt = Math.max(lockAt + 1, tick.event.minute + 3);
-
-  return {
-    id: `txline-${tick.event.id}`,
-    kind: tick.event.type === "momentum" ? "momentum" : "next_event",
-    prompt:
-      tick.event.type === "goal" || tick.event.type === "red_card"
-        ? "Which side will the next market reaction favor?"
-        : "Which side is gaining match pulse from this update?",
-    context: `${tick.event.title}: ${tick.event.description}`,
-    options: [
-      { id: "home", label: fixture.home.shortName, team: "home" },
-      { id: "neutral", label: "Balanced pulse" },
-      { id: "away", label: fixture.away.shortName, team: "away" }
-    ],
-    lockAt,
-    resolvesAt,
-    source: {
-      stream: "score",
-      endpoint: "/api/scores/stream",
-      expectedSignal: tick.event.type
-    },
-    resolved: {
-      optionId: trend === "neutral" ? "neutral" : favored,
-      eventId: tick.event.id,
-      explanation: `Resolved by TxLINE update ${tick.event.id}.`
-    }
-  };
-}
-
 function useLocalFan() {
   const [fan, setFan] = useState<FanState>(defaultFan);
 
@@ -330,6 +297,7 @@ export default function MatchPulseArena() {
   const sourceRef = useRef<EventSource | null>(null);
   const liveStartedForRef = useRef<string | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
+  const seenTickIdsRef = useRef(new Set<string>());
   const matchNotifications = useMatchNotifications();
 
   const selectedFixture = useMemo(
@@ -364,6 +332,7 @@ export default function MatchPulseArena() {
     sourceRef.current?.close();
     sourceRef.current = null;
     liveStartedForRef.current = null;
+    seenTickIdsRef.current.clear();
     setSnapshotState("loading");
     setRoomNotice(null);
     const response = await fetch(`/api/txline/matches/${matchId}/snapshot`, { cache: "no-store" });
@@ -607,24 +576,33 @@ export default function MatchPulseArena() {
     (tick: ReplayTick) => {
       if (!selectedFixture) return;
 
+      const tickId = `${tick.txlineUpdateId ?? tick.event.id}:${tick.event.id}`;
+      if (seenTickIdsRef.current.has(tickId)) return;
+      seenTickIdsRef.current.add(tickId);
+      if (seenTickIdsRef.current.size > 250) {
+        seenTickIdsRef.current = new Set([...seenTickIdsRef.current].slice(-125));
+      }
+
       matchNotifications.notifyFromTick(tick, selectedFixture);
 
       setLiveUpdateAt(Date.now());
       window.setTimeout(() => setLiveUpdateAt(null), 2600);
       setLastTick(tick);
-      setEvents((current) => [tick.event, ...current].slice(0, 12));
+      setEvents((current) => (current.some((event) => event.id === tick.event.id) ? current : [tick.event, ...current].slice(0, 12)));
       setSentiment(tick.sentiment);
       setMomentumHistory((current) => {
         const share = tick.sentiment.home + tick.sentiment.away;
         const point = share > 0 ? Math.round((tick.sentiment.home / share) * 100) : 50;
         return [...current, point].slice(-24);
       });
-      setClock({
-        minute: tick.event.minute,
-        stoppage: tick.event.stoppage ?? 0,
-        phase: tick.event.type === "full_time" ? "full" : "live",
-        label: tick.event.stoppage ? `${tick.event.minute}+${tick.event.stoppage}'` : `${tick.event.minute}'`
-      });
+      setClock(
+        tick.clock ?? {
+          minute: tick.event.minute,
+          stoppage: tick.event.stoppage ?? 0,
+          phase: tick.event.type === "full_time" ? "full" : "live",
+          label: tick.event.stoppage ? `${tick.event.minute}+${tick.event.stoppage}'` : `${tick.event.minute}'`
+        }
+      );
 
       if (tick.score) {
         setScore(tick.score);
@@ -637,7 +615,11 @@ export default function MatchPulseArena() {
         }
       }
 
-      const nextPrediction = tick.prediction ?? (tick.dataQuality === "delayed" ? null : predictionFromTick(tick, selectedFixture));
+      const nextPrediction =
+        tick.prediction ??
+        (tick.dataQuality === "delayed" || tick.suppressPrediction
+          ? null
+          : createPredictionFromTick(selectedFixture.id, selectedFixture, tick));
       if (nextPrediction && nextPrediction.id !== activePrediction?.id) {
         window.setTimeout(() => {
           setActivePrediction((current) => {
@@ -664,6 +646,11 @@ export default function MatchPulseArena() {
     source.addEventListener("connected", () => setStreamStatus("connected"));
     source.addEventListener("tick", (message) => {
       applyTick(JSON.parse((message as MessageEvent).data) as ReplayTick);
+    });
+    source.addEventListener("stream-error", (message) => {
+      const payload = JSON.parse((message as MessageEvent).data) as { message?: string };
+      setRoomNotice(payload.message ?? "The TxLINE stream disconnected.");
+      setSnapshotQuality("delayed");
     });
     source.addEventListener("complete", () => {
       source.close();
@@ -1160,7 +1147,7 @@ function Scoreboard({
           )}
           <div className="mt-6 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 sm:mt-7 sm:gap-3">
             <ScoreTeam team={fixture.home} side="home" score={score.home} />
-            <div className={cn("score-pop min-w-[4.75rem] rounded-[1.15rem] border border-white/[0.18] bg-white px-3 py-2 text-center font-data text-3xl font-black text-[#081A2F] shadow-[0_18px_48px_rgba(255,255,255,0.16)] sm:min-w-[7rem] sm:rounded-[1.25rem] sm:px-4 sm:py-3 sm:text-6xl", (waitingForSnapshot || snapshotUnavailable) && "animate-pulse text-[#5d6473]")}>
+            <div key={`${score.home}-${score.away}`} className={cn("score-pop min-w-[4.75rem] rounded-[1.15rem] border border-white/[0.18] bg-white px-3 py-2 text-center font-data text-3xl font-black text-[#081A2F] shadow-[0_18px_48px_rgba(255,255,255,0.16)] sm:min-w-[7rem] sm:rounded-[1.25rem] sm:px-4 sm:py-3 sm:text-6xl", (waitingForSnapshot || snapshotUnavailable) && "animate-pulse text-[#5d6473]")}>
               {waitingForSnapshot || snapshotUnavailable ? "–" : `${score.home}-${score.away}`}
             </div>
             <ScoreTeam team={fixture.away} side="away" score={score.away} />

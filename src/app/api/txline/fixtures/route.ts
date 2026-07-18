@@ -20,7 +20,10 @@ export async function GET() {
     const fixtures = await getTxLineAdapter().getFixtures();
     const readiness = getTxLineReadiness();
     rememberRuntimeFixtures(fixtures);
-    await Promise.allSettled(fixtures.map((fixture) => upsertMatchFixture(fixture)));
+    const featuredFixture = fixtures.find((fixture) => fixture.featured) ?? fixtures[0];
+    if (featuredFixture) {
+      void upsertMatchFixture(featuredFixture).catch(() => undefined);
+    }
     const body = {
       fixtures,
       generatedAt: new Date().toISOString(),

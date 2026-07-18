@@ -15,6 +15,8 @@ export interface TxLineServerConfig {
   fixturesPath: string;
   scoreSnapshotPath: string;
   oddsSnapshotPath: string;
+  scoreUpdatesPath: string;
+  oddsUpdatesPath: string;
   scoreStreamPath: string;
   oddsStreamPath: string;
   historicalScoresPath: string;
@@ -55,6 +57,8 @@ export function getTxLineConfig(): TxLineServerConfig {
     fixturesPath: clean(process.env.TXLINE_FIXTURES_PATH) ?? "/fixtures/snapshot",
     scoreSnapshotPath: clean(process.env.TXLINE_SCORE_SNAPSHOT_PATH) ?? "/scores/snapshot/{matchId}",
     oddsSnapshotPath: clean(process.env.TXLINE_ODDS_SNAPSHOT_PATH) ?? "/odds/snapshot/{matchId}",
+    scoreUpdatesPath: clean(process.env.TXLINE_SCORE_UPDATES_PATH) ?? "/scores/updates/{matchId}",
+    oddsUpdatesPath: clean(process.env.TXLINE_ODDS_UPDATES_PATH) ?? "/odds/updates/{matchId}",
     scoreStreamPath: clean(process.env.TXLINE_SCORE_STREAM_PATH) ?? "/scores/stream",
     oddsStreamPath: clean(process.env.TXLINE_ODDS_STREAM_PATH) ?? "/odds/stream",
     historicalScoresPath: clean(process.env.TXLINE_HISTORICAL_SCORES_PATH) ?? "/scores/historical/{matchId}"

@@ -34,10 +34,10 @@ TxLINE Data Layer  (Bearer JWT + X-Api-Token)      Prisma → PostgreSQL (Supaba
 
 - **Framework:** Next.js 14 (App Router), React 18, TypeScript.
 - **Styling:** Tailwind CSS + shadcn-style primitives; self-hosted fonts.
-- **Data:** Prisma ORM over PostgreSQL (Supabase). Graceful degradation to in-memory when `DATABASE_URL` is absent.
+- **Data:** Prisma ORM over PostgreSQL (Supabase). Transaction-pooler connections are configured for PgBouncer, while migrations use session pooling. Public live reads remain available when persistence is absent or delayed.
 - **Auth:** Sign-In With Solana (SIWS-style) verified server-side with `tweetnacl`; HTTP-only session cookie.
-- **Realtime:** Server-Sent Events, one long-lived stream per match room.
-- **Deploy:** Vercel (serverless). `prisma generate` runs in the build step.
+- **Realtime:** Filtered TxLINE score + odds SSE feeds are normalized into one browser-facing SSE stream, with current-interval endpoint fallback.
+- **Deploy:** Vercel (serverless). `prisma generate` runs in the build step; committed migrations are applied explicitly with `npm run db:deploy`.
 
 ---
 
@@ -47,10 +47,13 @@ All TxLINE access is isolated under `src/services/txline` behind a single `TxLin
 
 Design choices that made it robust:
 
-- **Schema normalization.** TxLINE payloads vary in field casing and shape across feeds (`Participant1` vs `participant1`, `FixtureId` vs `fixtureId`, epoch vs ISO timestamps, nested vs flat score objects). The real adapter normalizes ~8 aliases per field and coerces timestamps, so one code path scales from a friendly fixture to all 104 World Cup games.
-- **Layered caching + stale-serve.** Fixtures cache 60s (stale-served up to 10 min on upstream failure); score snapshots cache 45s. Any served-stale response is explicitly labeled `dataQuality: "delayed"` with a user-visible notice — never silently stale.
+- **Schema normalization.** The parser handles TxLINE's documented soccer fields (`scoreSoccer`, `dataSoccer`, `statusSoccerId`, `clock`, `participant`, `seq`, `ts`) plus casing aliases. Goals, cards, team attribution, score, and phase are normalized before reaching React.
+- **Direct dual-stream ingestion.** The adapter connects to both `/api/scores/stream?fixtureId=...` and `/api/odds/stream?fixtureId=...`, so a goal or consensus move does not wait for snapshot polling.
+- **Current-interval safety net.** `/api/scores/updates/{fixtureId}` and `/api/odds/updates/{fixtureId}` are polled every two seconds in parallel. TxLINE sequence and message IDs deduplicate fallback and SSE records.
+- **Layered caching + stale-serve.** Fixtures cache 60s (stale-served up to 10 min on upstream failure). The 45-second snapshot cache is used only when a fresh upstream score request fails. Delayed responses are explicitly labeled `dataQuality: "delayed"`.
 - **Timeouts + retry.** Per-call `AbortController` timeouts (1.2s–8s by endpoint) with a single retry and backoff, so a slow upstream degrades gracefully instead of hanging a room.
 - **Serverless-safe streaming.** The live SSE loop closes gracefully a few seconds before the Vercel function duration cap and the client auto-reconnects, so a match room keeps updating across the full 90 minutes.
+- **Non-blocking persistence.** Browser-facing fixture, snapshot, and live ticks are returned before optional Postgres writes, so a database outage cannot delay the score.
 - **Live vs replay.** The same client room pipeline handles a live snapshot stream and a historical replay built from TxLINE historical scores — useful for demos when no match is in play.
 
 ### TxLINE endpoints used
@@ -60,7 +63,10 @@ Design choices that made it robust:
 | Fixtures list (all matches) | `GET /api/fixtures/snapshot` | `/api/txline/fixtures`, room bootstrap |
 | Live score snapshot | `GET /api/scores/snapshot/{fixtureId}` | `/api/txline/matches/:id/snapshot` + live stream |
 | Live odds → market sentiment | `GET /api/odds/snapshot/{fixtureId}` | snapshot enrichment + live sentiment |
-| Live score stream | `GET /api/scores/stream` | live tick generator |
+| Live score stream | `GET /api/scores/stream?fixtureId={fixtureId}` | immediate score/event ticks |
+| Live odds stream | `GET /api/odds/stream?fixtureId={fixtureId}` | immediate market-pulse ticks |
+| Current score updates | `GET /api/scores/updates/{fixtureId}` | two-second stream fallback |
+| Current odds updates | `GET /api/odds/updates/{fixtureId}` | two-second sentiment fallback |
 | Historical scores (replay) | `GET /api/scores/historical/{fixtureId}` | replay mode |
 
 ---
@@ -107,6 +113,7 @@ Public pages: `/` (arena), `/rooms/:inviteCode` (creator invite), `/widget/:invi
 ```bash
 npm install                 # runs prisma generate via postinstall
 cp .env.example .env.local  # add TXLINE_JWT / TXLINE_API_TOKEN (via /txline-activate)
+npm run db:deploy           # apply committed schema migrations to PostgreSQL
 npm run dev                 # http://localhost:3000
 ```
 

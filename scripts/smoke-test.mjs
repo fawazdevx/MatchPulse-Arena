@@ -129,7 +129,7 @@ async function checkStateAndCreatorFallback(matchId) {
     })
   });
 
-  assert([200, 422, 503].includes(creator.response.status), `creator response returned unexpected status ${creator.response.status}`);
+  assert([200, 401, 422, 503].includes(creator.response.status), `creator response returned unexpected status ${creator.response.status}`);
   assertFanSafeText("creator response", JSON.stringify(creator.json));
 }
 

@@ -10,6 +10,13 @@ import type {
 } from "@/lib/types";
 import type { TxLineServerConfig } from "@/lib/server/env";
 import { rememberRuntimeFixtures } from "@/services/txline/runtime-cache";
+import {
+  txLineClockFromRecord,
+  txLineEventTypeFromRecord,
+  txLineScoreFromRecord,
+  txLineTeamSideFromRecord,
+  txLineUpdateIdFromRecord
+} from "./normalizers";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -22,17 +29,26 @@ const snapshotCacheTtlMs = 45_000;
 const defaultTimeoutMs = 4_000;
 const fixtureTimeoutMs = 8_000;
 const snapshotFixtureTimeoutMs = 1_200;
+const liveFallbackPollMs = 2_000;
 
 const replaceMatchId = (path: string, matchId: string) => path.replace("{matchId}", encodeURIComponent(matchId));
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function txLineFetch<T>(config: TxLineServerConfig, path: string, timeoutMs = defaultTimeoutMs): Promise<T> {
+async function txLineFetch<T>(
+  config: TxLineServerConfig,
+  path: string,
+  timeoutMs = defaultTimeoutMs,
+  externalSignal?: AbortSignal
+): Promise<T> {
   if (!config.jwt || !config.apiToken) {
     throw new Error("Missing TXLINE_JWT or TXLINE_API_TOKEN");
   }
 
   const controller = new AbortController();
+  const abortRequest = () => controller.abort();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  externalSignal?.addEventListener("abort", abortRequest, { once: true });
+  if (externalSignal?.aborted) controller.abort();
 
   let response: Response;
   try {
@@ -47,6 +63,9 @@ async function txLineFetch<T>(config: TxLineServerConfig, path: string, timeoutM
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
+      if (externalSignal?.aborted) {
+        throw new Error(`TxLINE request aborted: ${path}`);
+      }
       throw new Error(`TxLINE request timed out after ${timeoutMs}ms: ${path}`);
     }
 
@@ -54,6 +73,7 @@ async function txLineFetch<T>(config: TxLineServerConfig, path: string, timeoutM
     throw new Error(`TxLINE network request failed${cause?.code ? ` (${cause.code})` : ""}: ${path}`);
   } finally {
     clearTimeout(timeout);
+    externalSignal?.removeEventListener("abort", abortRequest);
   }
 
   if (!response.ok) {
@@ -81,7 +101,7 @@ async function retryTxLineFetch<T>(config: TxLineServerConfig, path: string, tim
   throw lastError instanceof Error ? lastError : new Error(`TxLINE request failed: ${path}`);
 }
 
-async function* txLineStream(config: TxLineServerConfig, path: string): AsyncGenerator<unknown> {
+async function* txLineStream(config: TxLineServerConfig, path: string, signal?: AbortSignal): AsyncGenerator<unknown> {
   if (!config.jwt || !config.apiToken) {
     throw new Error("Missing TXLINE_JWT or TXLINE_API_TOKEN");
   }
@@ -90,9 +110,11 @@ async function* txLineStream(config: TxLineServerConfig, path: string): AsyncGen
     headers: {
       Authorization: `Bearer ${config.jwt}`,
       "X-Api-Token": config.apiToken,
-      Accept: "text/event-stream, application/json"
+      Accept: "text/event-stream",
+      "Cache-Control": "no-cache"
     },
-    cache: "no-store"
+    cache: "no-store",
+    signal
   });
 
   if (!response.ok) {
@@ -109,21 +131,131 @@ async function* txLineStream(config: TxLineServerConfig, path: string): AsyncGen
   const decoder = new TextDecoder();
   let buffer = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
-    const drained = drainStreamBuffer(buffer);
-    buffer = drained.remainder;
+      buffer += decoder.decode(value, { stream: true });
+      const drained = drainStreamBuffer(buffer);
+      buffer = drained.remainder;
 
-    for (const payload of drained.payloads) {
-      yield payload;
+      for (const payload of drained.payloads) {
+        yield payload;
+      }
     }
+  } finally {
+    reader.releaseLock();
   }
 
   for (const payload of parseStreamFrame(buffer)) {
     yield payload;
+  }
+}
+
+function streamPathForFixture(path: string, matchId: string) {
+  if (!/^\d+$/.test(matchId)) return path;
+
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}fixtureId=${encodeURIComponent(matchId)}`;
+}
+
+type TaggedStreamPayload = {
+  source: "score" | "odds";
+  payload: unknown;
+};
+
+type TaggedLiveStream = {
+  source: TaggedStreamPayload["source"];
+  stream: AsyncGenerator<unknown>;
+};
+
+function sleepWithSignal(ms: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve) => {
+    const finish = () => {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timeout = setTimeout(finish, ms);
+    signal?.addEventListener("abort", finish, { once: true });
+    if (signal?.aborted) finish();
+  });
+}
+
+async function* txLineUpdatePoll(
+  config: TxLineServerConfig,
+  path: string,
+  signal?: AbortSignal
+): AsyncGenerator<unknown> {
+  let consecutiveFailures = 0;
+
+  while (!signal?.aborted) {
+    try {
+      yield await txLineFetch<unknown>(config, path, 2_500, signal);
+      consecutiveFailures = 0;
+    } catch (error) {
+      if (signal?.aborted) return;
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= 3) throw error;
+    }
+
+    await sleepWithSignal(liveFallbackPollMs, signal);
+  }
+}
+
+async function* mergeLiveStreams(
+  streams: TaggedLiveStream[],
+  signal?: AbortSignal
+): AsyncGenerator<TaggedStreamPayload> {
+  const queue: TaggedStreamPayload[] = [];
+  const errors: unknown[] = [];
+  let activeStreams = streams.length;
+  let wake: (() => void) | undefined;
+
+  const notify = () => {
+    wake?.();
+    wake = undefined;
+  };
+
+  const pump = async (source: TaggedStreamPayload["source"], stream: AsyncGenerator<unknown>) => {
+    try {
+      for await (const payload of stream) {
+        if (signal?.aborted) break;
+        queue.push({ source, payload });
+        notify();
+      }
+    } catch (error) {
+      if (!signal?.aborted) errors.push(error);
+    } finally {
+      activeStreams -= 1;
+      notify();
+    }
+  };
+
+  for (const item of streams) {
+    void pump(item.source, item.stream);
+  }
+
+  while (!signal?.aborted && (activeStreams > 0 || queue.length > 0)) {
+    if (!queue.length) {
+      await new Promise<void>((resolve) => {
+        const finish = () => {
+          signal?.removeEventListener("abort", finish);
+          resolve();
+        };
+        wake = finish;
+        signal?.addEventListener("abort", finish, { once: true });
+      });
+      continue;
+    }
+
+    const next = queue.shift();
+    if (next) yield next;
+  }
+
+  if (!signal?.aborted && activeStreams === 0 && errors.length === streams.length) {
+    throw errors[0] instanceof Error ? errors[0] : new Error("TxLINE live streams disconnected.");
   }
 }
 
@@ -203,7 +335,7 @@ export class RealTxLineAdapter implements TxLineAdapter {
     const scoreRecords = recordsFromPayload(scoreResult.value);
     const oddsRecords = oddsResult.status === "fulfilled" ? recordsFromPayload(oddsResult.value) : [];
     const scoreRecord = latestRecord(scoreRecords, matchId, true);
-    const oddsRecord = latestRecord(oddsRecords, matchId, true);
+    const oddsRecord = bestSentimentRecord(oddsRecords, matchId);
     const cachedSnapshot = snapshotCache.get(snapshotCacheKey)?.snapshot;
     const fixture =
       (fixtureResult.status === "fulfilled" ? fixtureResult.value.find((item) => item.id === matchId) : undefined) ??
@@ -265,46 +397,123 @@ export class RealTxLineAdapter implements TxLineAdapter {
     for (const [index, record] of records.entries()) {
       await sleep(900);
 
+      const clock = extractClock(record, fixture.status);
       yield {
         atSecond: index + 1,
         event: eventFromScoreRecord(record, fixture, index, sentiment),
+        clock,
+        txlineUpdateId: txLineUpdateIdFromRecord(record, `${matchId}-replay-${index}`),
         score: extractScore(record),
         sentiment
       };
     }
   }
 
-  async *getLiveTicks(matchId: string): AsyncGenerator<ReplayTick> {
-    const fixture = (await this.getFixtureFromCacheOrNetwork(snapshotFixtureTimeoutMs).catch(() => [])).find((item) => item.id === matchId) ?? fixtureFromTxLine({ FixtureId: matchId }, 0);
-    let sentiment = neutralSentiment();
+  async *getLiveTicks(matchId: string, signal?: AbortSignal): AsyncGenerator<ReplayTick> {
+    const snapshot = await this.getSnapshot(matchId).catch(() => null);
+    const fixture =
+      snapshot?.fixture ??
+      (await this.getFixtureFromCacheOrNetwork(snapshotFixtureTimeoutMs).catch(() => [])).find((item) => item.id === matchId) ??
+      fixtureFromTxLine({ FixtureId: matchId }, 0);
+    let sentiment = snapshot?.sentiment ?? neutralSentiment();
+    let score = snapshot?.score ?? { home: 0, away: 0 };
+    let clock = snapshot?.clock ?? {
+      minute: 0,
+      stoppage: 0,
+      phase: fixture?.status ?? "pre",
+      label: fixture?.status === "pre" ? "Pre-match" : "Live"
+    };
+    let lastSentimentSource = sentiment.sourceUpdateId;
+    const seenScoreUpdates = new Set<string>();
+    const snapshotEventIds = new Set(snapshot?.events.map((event) => event.id) ?? []);
     let counter = 0;
 
     if (!fixture) {
       throw new Error(`TxLINE fixture ${matchId} was not found.`);
     }
 
-    for await (const payload of txLineStream(this.config, this.config.scoreStreamPath)) {
-      const records = recordsFromPayload(payload).filter((record) => matchesFixture(record, matchId, false));
+    const scoreStream = txLineStream(this.config, streamPathForFixture(this.config.scoreStreamPath, matchId), signal);
+    const oddsStream = txLineStream(this.config, streamPathForFixture(this.config.oddsStreamPath, matchId), signal);
+    const scoreUpdates = txLineUpdatePoll(this.config, replaceMatchId(this.config.scoreUpdatesPath, matchId), signal);
+    const oddsUpdates = txLineUpdatePoll(this.config, replaceMatchId(this.config.oddsUpdatesPath, matchId), signal);
 
-      for (const record of records) {
-        counter += 1;
-        sentiment = await this.getLatestSentiment(matchId, fixture, sentiment);
+    for await (const message of mergeLiveStreams(
+      [
+        { source: "score", stream: scoreStream },
+        { source: "odds", stream: oddsStream },
+        { source: "score", stream: scoreUpdates },
+        { source: "odds", stream: oddsUpdates }
+      ],
+      signal
+    )) {
+      if (message.source === "score") {
+        const records = recordsFromPayload(message.payload)
+          .filter((record) => matchesFixture(record, matchId, false))
+          .sort((a, b) => recordTimestamp(a) - recordTimestamp(b));
 
-        yield {
-          atSecond: counter,
-          event: eventFromScoreRecord(record, fixture, counter, sentiment),
-          score: extractScore(record),
-          sentiment
-        };
+        for (const record of records) {
+          const updateId = txLineUpdateIdFromRecord(record, `${matchId}-score-${counter}`);
+          if (seenScoreUpdates.has(updateId)) continue;
+
+          const event = eventFromScoreRecord(record, fixture, counter, sentiment);
+          seenScoreUpdates.add(updateId);
+          if (seenScoreUpdates.size > 500) {
+            const recent = [...seenScoreUpdates].slice(-250);
+            seenScoreUpdates.clear();
+            recent.forEach((id) => seenScoreUpdates.add(id));
+          }
+          if (snapshotEventIds.delete(event.id)) continue;
+
+          counter += 1;
+          score = extractScore(record);
+          clock = extractClock(record, clock.phase);
+
+          yield {
+            atSecond: counter,
+            event,
+            clock,
+            txlineUpdateId: updateId,
+            snapshotGeneratedAt: new Date().toISOString(),
+            score,
+            sentiment
+          };
+        }
+        continue;
       }
-    }
-  }
 
-  private async getLatestSentiment(matchId: string, fixture: MatchFixture, fallback: MarketSentiment) {
-    const oddsPath = replaceMatchId(this.config.oddsSnapshotPath, matchId);
-    const payload = await txLineFetch<unknown>(this.config, oddsPath, 2_500).catch(() => null);
-    const record = payload ? latestRecord(recordsFromPayload(payload), matchId, true) : undefined;
-    return extractSentiment(record, fixture, fallback);
+      const oddsRecord = bestSentimentRecord(recordsFromPayload(message.payload), matchId);
+      if (!oddsRecord) continue;
+
+      const nextSentiment = extractSentiment(oddsRecord, fixture, sentiment);
+      if (nextSentiment.sourceUpdateId === lastSentimentSource) continue;
+
+      sentiment = nextSentiment;
+      lastSentimentSource = nextSentiment.sourceUpdateId;
+      counter += 1;
+
+      yield {
+        atSecond: counter,
+        event: {
+          id: `odds-${matchId}-${nextSentiment.sourceUpdateId}`,
+          minute: clock.minute,
+          stoppage: clock.stoppage,
+          type: "momentum",
+          team: nextSentiment.trend === "neutral" ? undefined : nextSentiment.trend,
+          title: "Market pulse moved",
+          description:
+            nextSentiment.trend === "neutral"
+              ? `TxLINE consensus moved back toward a balanced read at ${fixture.home.shortName} ${nextSentiment.home}% / ${fixture.away.shortName} ${nextSentiment.away}%.`
+              : `TxLINE consensus shifted toward ${nextSentiment.trend === "home" ? fixture.home.shortName : fixture.away.shortName} by ${nextSentiment.delta} points.`,
+          impact: nextSentiment.delta >= 8 ? "high" : nextSentiment.delta >= 3 ? "medium" : "low",
+          sentimentAfter: nextSentiment
+        },
+        clock,
+        txlineUpdateId: nextSentiment.sourceUpdateId,
+        snapshotGeneratedAt: new Date().toISOString(),
+        score,
+        sentiment: nextSentiment
+      };
+    }
   }
 
   private snapshotCacheKey(matchId: string) {
@@ -603,62 +812,48 @@ function latestRecord(records: JsonRecord[], matchId: string, allowMissingFixtur
     .sort((a, b) => recordTimestamp(b) - recordTimestamp(a))[0];
 }
 
+function bestSentimentRecord(records: JsonRecord[], matchId: string) {
+  return records
+    .filter((record) => matchesFixture(record, matchId, true))
+    .map((record) => ({ record, score: sentimentRecordScore(record) }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((a, b) => b.score - a.score || recordTimestamp(b.record) - recordTimestamp(a.record))[0]?.record;
+}
+
+function sentimentRecordScore(source: JsonRecord) {
+  const names = stringArrayValue(source, ["PriceNames", "priceNames", "Names", "names", "outcomes"]);
+  const percentages = numberArrayValue(source, ["Pct", "pct", "Percentages", "percentages", "ImpliedProbabilities", "impliedProbabilities"]);
+  if (percentages.length < 2 || names.length < 2) return 0;
+
+  const normalizedNames = names.map((name) => name.trim().toLowerCase());
+  const marketType = stringValue(source, ["SuperOddsType", "superOddsType", "MarketType", "marketType"])?.toLowerCase() ?? "";
+  const marketPeriod = stringValue(source, ["MarketPeriod", "marketPeriod"])?.toLowerCase() ?? "";
+  const hasHome = normalizedNames.some((name) => ["1", "home", "participant1", "team1"].includes(name) || name.includes("home"));
+  const hasAway = normalizedNames.some((name) => ["2", "away", "participant2", "team2"].includes(name) || name.includes("away"));
+  const hasDraw = normalizedNames.some((name) => ["x", "draw", "tie"].includes(name));
+  const isResultMarket = /(1x2|three.?way|match.?result|full.?time.?result|moneyline|winner)/.test(marketType);
+  if (!(hasHome && hasAway) && !hasDraw && !isResultMarket) return 0;
+
+  let score = 0;
+
+  if (hasHome && hasAway) score += 40;
+  if (hasDraw && percentages.length >= 3) score += 60;
+  if (isResultMarket) score += 30;
+  if (!marketPeriod || /(match|full|regular|all)/.test(marketPeriod)) score += 5;
+  return score;
+}
+
 function matchesFixture(record: JsonRecord | undefined, matchId: string, allowMissingFixtureId: boolean) {
   const id = fixtureIdValue(record);
   return id ? id === matchId : allowMissingFixtureId;
 }
 
 function extractScore(source: JsonRecord | undefined) {
-  const nestedScore = asRecord(source?.Score) ?? asRecord(source?.score) ?? asRecord(source?.CurrentScore) ?? asRecord(source?.currentScore);
-  const participant1 = asRecord(nestedScore?.Participant1) ?? asRecord(nestedScore?.participant1);
-  const participant2 = asRecord(nestedScore?.Participant2) ?? asRecord(nestedScore?.participant2);
-  const participant1Total = asRecord(participant1?.Total) ?? asRecord(participant1?.total);
-  const participant2Total = asRecord(participant2?.Total) ?? asRecord(participant2?.total);
-  const arrayScore = numberArrayValue(source, ["Scores", "scores", "CurrentScore", "currentScore"]);
-  const participant1Goals =
-    numberValue(source, ["HomeScore", "homeScore", "home_score", "scoreHome", "Participant1Score", "participant1Score", "Team1Score", "team1Score"]) ??
-    numberValue(nestedScore, ["home", "Home", "homeScore", "HomeScore", "Participant1Score"]) ??
-    numberValue(participant1Total, ["Goals", "goals"]) ??
-    numberValue(participant1, ["Goals", "goals"]) ??
-    arrayScore[0] ??
-    0;
-  const participant2Goals =
-    numberValue(source, ["AwayScore", "awayScore", "away_score", "scoreAway", "Participant2Score", "participant2Score", "Team2Score", "team2Score"]) ??
-    numberValue(nestedScore, ["away", "Away", "awayScore", "AwayScore", "Participant2Score"]) ??
-    numberValue(participant2Total, ["Goals", "goals"]) ??
-    numberValue(participant2, ["Goals", "goals"]) ??
-    arrayScore[1] ??
-    0;
-  const participant1IsHome = booleanValue(source, ["Participant1IsHome", "participant1IsHome"]) ?? true;
-  const home = participant1IsHome ? participant1Goals : participant2Goals;
-  const away = participant1IsHome ? participant2Goals : participant1Goals;
-
-  return {
-    home: Math.max(0, Math.round(home)),
-    away: Math.max(0, Math.round(away))
-  };
+  return txLineScoreFromRecord(source);
 }
 
 function extractClock(source: JsonRecord | undefined, fallbackPhase: MatchSnapshot["clock"]["phase"]) {
-  const clock = asRecord(source?.Clock) ?? asRecord(source?.clock);
-  const seconds = numberValue(clock, ["Seconds", "seconds"]);
-  const minute = Math.max(
-    0,
-    Math.round(
-      numberValue(source, ["Minute", "minute", "MatchMinute", "matchMinute", "GameTime", "gameTime", "Elapsed", "elapsed"]) ?? (seconds ? seconds / 60 : 0)
-    )
-  );
-  const stoppage = Math.max(0, Math.round(numberValue(source, ["Stoppage", "stoppage", "AddedTime", "addedTime", "ExtraMinute", "extraMinute"]) ?? 0));
-  const running = booleanValue(clock, ["Running", "running"]);
-  const basePhase = phaseValue(source, fallbackPhase);
-  const phase = seconds && seconds > 0 && basePhase === "pre" ? (running === false ? "full" : "live") : basePhase;
-
-  return {
-    minute,
-    stoppage,
-    phase,
-    label: minute ? (stoppage ? `${minute}+${stoppage}'` : `${minute}'`) : phase === "pre" ? "Pre-match" : phase === "full" ? "Full time" : "Live"
-  };
+  return txLineClockFromRecord(source, fallbackPhase);
 }
 
 function extractSentiment(source: JsonRecord | undefined, fixture: MatchFixture, fallback: MarketSentiment): MarketSentiment {
@@ -671,9 +866,9 @@ function extractSentiment(source: JsonRecord | undefined, fixture: MatchFixture,
     return fallback;
   }
 
-  const homeIndex = outcomeIndex(names, ["home", "participant1", "team1", fixture.home.name, fixture.home.shortName], 0);
+  const homeIndex = outcomeIndex(names, ["1", "home", "participant1", "team1", fixture.home.name, fixture.home.shortName], 0);
   const drawIndex = outcomeIndex(names, ["draw", "tie", "x"], implied.length === 3 ? 1 : -1);
-  const awayIndex = outcomeIndex(names, ["away", "participant2", "team2", fixture.away.name, fixture.away.shortName], implied.length === 3 ? 2 : 1);
+  const awayIndex = outcomeIndex(names, ["2", "away", "participant2", "team2", fixture.away.name, fixture.away.shortName], implied.length === 3 ? 2 : 1);
   const rawHome = implied[homeIndex] ?? implied[0] ?? fallback.home;
   const rawDraw = drawIndex >= 0 ? implied[drawIndex] ?? 0 : 0;
   const rawAway = implied[awayIndex] ?? implied[1] ?? fallback.away;
@@ -689,14 +884,21 @@ function extractSentiment(source: JsonRecord | undefined, fixture: MatchFixture,
     away,
     trend,
     delta: Math.max(Math.abs(home - fallback.home), Math.abs(away - fallback.away)),
-    label: stringValue(source, ["Label", "label", "MarketName", "marketName", "MarketType", "marketType"]) ?? "TxLINE market sentiment",
-    sourceUpdateId: stringValue(source, ["Id", "id", "UpdateId", "updateId", "Sequence", "sequence", "Timestamp", "timestamp"]) ?? fallback.sourceUpdateId
+    label:
+      stringValue(source, ["Label", "label", "MarketName", "marketName", "SuperOddsType", "superOddsType", "MarketType", "marketType"]) ??
+      "TxLINE market sentiment",
+    sourceUpdateId:
+      stringValue(source, ["MessageId", "messageId", "Id", "id", "UpdateId", "updateId", "Sequence", "sequence", "Ts", "ts", "Timestamp", "timestamp"]) ??
+      fallback.sourceUpdateId
   };
 }
 
 function outcomeIndex(names: string[], needles: string[], fallback: number) {
   const normalizedNeedles = needles.map((needle) => needle.toLowerCase());
-  const index = names.findIndex((name) => normalizedNeedles.some((needle) => name.toLowerCase().includes(needle)));
+  const index = names.findIndex((name) => {
+    const normalizedName = name.toLowerCase().trim();
+    return normalizedNeedles.some((needle) => (needle.length <= 2 ? normalizedName === needle : normalizedName.includes(needle)));
+  });
   return index >= 0 ? index : fallback;
 }
 
@@ -738,16 +940,7 @@ function eventFromScoreRecord(source: JsonRecord, fixture: MatchFixture, index: 
 }
 
 function eventTypeFrom(source: JsonRecord | undefined): EventType {
-  const raw = stringValue(source, ["EventType", "eventType", "Type", "type", "Action", "action", "ScoreType", "scoreType"])?.toLowerCase() ?? "";
-  if (raw.includes("kick")) return "kickoff";
-  if (raw.includes("goal")) return "goal";
-  if (raw.includes("red")) return "red_card";
-  if (raw.includes("yellow")) return "yellow_card";
-  if (raw.includes("corner")) return "corner";
-  if (raw.includes("sub")) return "substitution";
-  if (raw.includes("var")) return "var";
-  if (raw.includes("full") || raw.includes("finish")) return "full_time";
-  return "momentum";
+  return txLineEventTypeFromRecord(source);
 }
 
 function titleForEvent(type: EventType) {
@@ -764,6 +957,9 @@ function impactForEvent(type: EventType): MatchEvent["impact"] {
 }
 
 function teamSideFrom(source: JsonRecord | undefined, fixture: MatchFixture): TeamKey | undefined {
+  const normalizedSide = txLineTeamSideFromRecord(source);
+  if (normalizedSide) return normalizedSide;
+
   const raw = stringValue(source, ["Team", "team", "TeamSide", "teamSide", "Participant", "participant", "ParticipantId", "participantId"])?.toLowerCase();
   if (!raw) return undefined;
   if (raw.includes("home") || raw.includes("participant1") || raw.includes("team1") || fixture.home.name.toLowerCase().includes(raw)) return "home";
