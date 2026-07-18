@@ -42,13 +42,17 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { TeamCrest } from "@/components/TeamCrest";
 import { badgeById, badges } from "@/services/game/badges";
-import { createPredictionFromTick } from "@/services/game/prediction-engine";
+import { createPredictionFromTick, resolvePredictionFromTick } from "@/services/game/prediction-engine";
 import { txLineEndpoints } from "@/services/txline/endpoints";
 import { useMatchNotifications } from "@/hooks/useMatchNotifications";
 
 type Screen = "home" | "room" | "leaderboard" | "passport" | "creator" | "analytics" | "replay" | "tech";
 type PredictionState = "waiting" | "active" | "answered" | "locked" | "resolved";
 type SnapshotState = "idle" | "loading" | "ready" | "error";
+
+// How long a micro-prediction card stays open for answers before it locks and
+// waits for the next resolving TxLINE update. Fan-facing countdown window.
+const PREDICTION_WINDOW_MS = 20_000;
 
 interface FanState {
   points: number;
@@ -274,6 +278,7 @@ export default function MatchPulseArena() {
   const [activePrediction, setActivePrediction] = useState<PredictionCard | null>(null);
   const [predictionState, setPredictionState] = useState<PredictionState>("waiting");
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
+  const [predictionSecondsLeft, setPredictionSecondsLeft] = useState(0);
   const [resolvedPredictions, setResolvedPredictions] = useState<ResolvedPrediction[]>([]);
   const [fan, setFan] = useLocalFan();
   const [roomLeaderboard, setRoomLeaderboard] = useState<LeaderboardUser[]>([]);
@@ -302,7 +307,25 @@ export default function MatchPulseArena() {
   const liveStartedForRef = useRef<string | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const seenTickIdsRef = useRef(new Set<string>());
+  // Timestamp (ms) when the current prediction window opened. Drives the 20s
+  // countdown and gates when a *new* card is allowed to replace the active one.
+  const predictionOpenedAtRef = useRef<number | null>(null);
+  // Refs mirror the live prediction state so the countdown interval reads fresh
+  // values without re-subscribing on every tick or option change.
+  const activePredictionRef = useRef<PredictionCard | null>(null);
+  const selectedOptionRef = useRef<string | null>(null);
+  const predictionStateRef = useRef<PredictionState>("waiting");
   const matchNotifications = useMatchNotifications();
+
+  useEffect(() => {
+    activePredictionRef.current = activePrediction;
+  }, [activePrediction]);
+  useEffect(() => {
+    selectedOptionRef.current = selectedOption;
+  }, [selectedOption]);
+  useEffect(() => {
+    predictionStateRef.current = predictionState;
+  }, [predictionState]);
 
   const selectedFixture = useMemo(
     () => fixtures.find((fixture) => fixture.id === selectedMatchId) ?? snapshot?.fixture ?? fixtures[0],
@@ -357,6 +380,8 @@ export default function MatchPulseArena() {
     setActivePrediction(null);
     setPredictionState("waiting");
     setSelectedOption(null);
+    setPredictionSecondsLeft(0);
+    predictionOpenedAtRef.current = null;
     setStreamStatus("idle");
     setMomentumHistory([]);
     setSnapshotState("ready");
@@ -376,6 +401,8 @@ export default function MatchPulseArena() {
         setActivePrediction(null);
         setPredictionState("waiting");
         setSelectedOption(null);
+        setPredictionSecondsLeft(0);
+        predictionOpenedAtRef.current = null;
         setMomentumHistory([]);
         setSnapshotQuality("delayed");
       }
@@ -576,6 +603,15 @@ export default function MatchPulseArena() {
     [fan, predictionState, selectedOption, selectedRoomId, setFan, walletUser]
   );
 
+  const resolvePredictionRef = useRef(resolvePrediction);
+  useEffect(() => {
+    resolvePredictionRef.current = resolvePrediction;
+  }, [resolvePrediction]);
+
+  // applyTick only handles live *display* (score, clock, sentiment, timeline).
+  // Prediction lifecycle is intentionally kept out of this SSE-bound closure —
+  // it lives in the lastTick-driven effect below so it always reads fresh state
+  // and respects the fixed answer window instead of resetting on every update.
   const applyTick = useCallback(
     (tick: ReplayTick) => {
       if (!selectedFixture) return;
@@ -611,32 +647,71 @@ export default function MatchPulseArena() {
       if (tick.score) {
         setScore(tick.score);
       }
-
-      if (activePrediction && selectedOption && predictionState !== "resolved") {
-        const resolvingCard = tick.resolvedPrediction ?? (activePrediction.resolved ? activePrediction : null);
-        if (resolvingCard) {
-          void resolvePrediction(resolvingCard, tick.event);
-        }
-      }
-
-      const nextPrediction =
-        tick.prediction ??
-        (tick.dataQuality === "delayed" || tick.suppressPrediction
-          ? null
-          : createPredictionFromTick(selectedFixture.id, selectedFixture, tick));
-      if (nextPrediction && nextPrediction.id !== activePrediction?.id) {
-        window.setTimeout(() => {
-          setActivePrediction((current) => {
-            if (current?.id === nextPrediction.id) return current;
-            return nextPrediction;
-          });
-          setPredictionState("active");
-          setSelectedOption(null);
-        }, 900);
-      }
     },
-    [activePrediction, matchNotifications, predictionState, resolvePrediction, selectedFixture, selectedOption]
+    [matchNotifications, selectedFixture]
   );
+
+  // Prediction lifecycle, driven by the newest tick but decoupled from the SSE
+  // closure. A card opens for PREDICTION_WINDOW_MS. New TxLINE updates that land
+  // *during* an open window resolve an answered card but never replace an
+  // unanswered one — that was the bug making cards flip every second.
+  useEffect(() => {
+    if (!lastTick || !selectedFixture) return;
+
+    const activeCard = activePredictionRef.current;
+    const state = predictionStateRef.current;
+    const chosen = selectedOptionRef.current;
+
+    // 1. A resolving update arrives for a card the fan already locked/answered.
+    if (activeCard && chosen && state !== "resolved" && state !== "active") {
+      const resolvingCard = lastTick.resolvedPrediction ?? resolvePredictionFromTick(activeCard, lastTick);
+      if (resolvingCard.resolved) {
+        void resolvePredictionRef.current(resolvingCard, lastTick.event);
+        return;
+      }
+    }
+
+    // 2. Only open a new card when there is no open answer window in progress.
+    const windowOpen =
+      predictionOpenedAtRef.current !== null &&
+      Date.now() - predictionOpenedAtRef.current < PREDICTION_WINDOW_MS &&
+      (state === "active" || state === "answered");
+    if (windowOpen) return;
+
+    if (lastTick.dataQuality === "delayed" || lastTick.suppressPrediction) return;
+
+    const nextPrediction = lastTick.prediction ?? createPredictionFromTick(selectedFixture.id, selectedFixture, lastTick);
+    if (!nextPrediction || nextPrediction.id === activeCard?.id) return;
+
+    predictionOpenedAtRef.current = Date.now();
+    setActivePrediction(nextPrediction);
+    setPredictionState("active");
+    setSelectedOption(null);
+    setPredictionSecondsLeft(Math.round(PREDICTION_WINDOW_MS / 1000));
+  }, [lastTick, selectedFixture]);
+
+  // 1-second countdown for the open answer window. When it hits zero the card
+  // locks: an answered card is scored on the next resolving tick, an unanswered
+  // one is simply retired when the following card opens.
+  useEffect(() => {
+    if (predictionState !== "active" && predictionState !== "answered") return;
+    if (predictionOpenedAtRef.current === null) return;
+
+    const tick = () => {
+      const openedAt = predictionOpenedAtRef.current;
+      if (openedAt === null) return;
+      const remaining = Math.max(0, PREDICTION_WINDOW_MS - (Date.now() - openedAt));
+      setPredictionSecondsLeft(Math.ceil(remaining / 1000));
+
+      if (remaining <= 0) {
+        setPredictionState((current) => (current === "active" || current === "answered" ? "locked" : current));
+      }
+    };
+
+    tick();
+    const interval = window.setInterval(tick, 1_000);
+    return () => window.clearInterval(interval);
+  }, [predictionState]);
 
   const startStream = useCallback((mode: "live" | "replay" = "live") => {
     if (!selectedFixture) return;
@@ -794,9 +869,11 @@ export default function MatchPulseArena() {
       return;
     }
 
+    // Record the pick and keep the window open until the countdown reaches zero,
+    // so a fan can change their answer while time remains. The countdown effect
+    // moves the card to "locked" at zero; the next resolving tick then scores it.
     setSelectedOption(optionId);
-    setPredictionState("answered");
-    window.setTimeout(() => setPredictionState((state) => (state === "answered" ? "locked" : state)), 1300);
+    setPredictionState((state) => (state === "active" ? "answered" : state));
   };
 
   const refreshLiveData = async () => {
@@ -883,6 +960,7 @@ export default function MatchPulseArena() {
               events={events}
               activePrediction={activePrediction}
               predictionState={predictionState}
+              predictionSecondsLeft={predictionSecondsLeft}
               selectedOption={selectedOption}
               onAnswer={handleAnswer}
               fan={fan}
@@ -1178,6 +1256,7 @@ function RoomScreen({
   events,
   activePrediction,
   predictionState,
+  predictionSecondsLeft,
   selectedOption,
   onAnswer,
   fan,
@@ -1200,6 +1279,7 @@ function RoomScreen({
   events: MatchEvent[];
   activePrediction: PredictionCard | null;
   predictionState: PredictionState;
+  predictionSecondsLeft: number;
   selectedOption: string | null;
   onAnswer: (optionId: string) => void;
   fan: FanState;
@@ -1235,6 +1315,7 @@ function RoomScreen({
           <PredictionPanel
             card={activePrediction}
             state={predictionState}
+            secondsLeft={predictionSecondsLeft}
             selectedOption={selectedOption}
             onAnswer={onAnswer}
             fixture={fixture}
@@ -1389,6 +1470,7 @@ function MomentumBar({ fixture, sentiment }: { fixture: MatchFixture; sentiment:
 function PredictionPanel({
   card,
   state,
+  secondsLeft,
   selectedOption,
   onAnswer,
   fixture,
@@ -1398,6 +1480,7 @@ function PredictionPanel({
 }: {
   card: PredictionCard | null;
   state: PredictionState;
+  secondsLeft: number;
   selectedOption: string | null;
   onAnswer: (optionId: string) => void;
   fixture: MatchFixture;
@@ -1418,6 +1501,14 @@ function PredictionPanel({
 
   const locked = state === "locked" || state === "resolved";
   const isActive = state === "active";
+  const answering = state === "active" || state === "answered";
+  const windowSeconds = Math.round(PREDICTION_WINDOW_MS / 1000);
+  const clampedSeconds = Math.max(0, Math.min(windowSeconds, secondsLeft));
+  const progress = answering ? clampedSeconds / windowSeconds : 0;
+  const ringColor = clampedSeconds <= 5 ? "#FF5C7A" : "#21E6A3";
+  const countdownRing = answering
+    ? `conic-gradient(${ringColor} 0 ${Math.round(progress * 100)}%, rgba(255,255,255,0.12) ${Math.round(progress * 100)}% 100%)`
+    : "conic-gradient(rgba(255,255,255,0.12) 0 100%)";
 
   return (
     <Card
@@ -1441,10 +1532,25 @@ function PredictionPanel({
             <CardTitle className="text-xl leading-tight sm:text-2xl">{card.prompt}</CardTitle>
             <CardDescription className="mt-2">{card.context}</CardDescription>
           </div>
-          <div className={cn("relative grid h-16 w-16 shrink-0 place-items-center rounded-full bg-[conic-gradient(#21E6A3_0_72%,rgba(255,255,255,0.12)_72%_100%)] p-1 min-[420px]:self-start", isActive && "animate-energy-pulse")}>
+          <div
+            className={cn("relative grid h-16 w-16 shrink-0 place-items-center rounded-full p-1 min-[420px]:self-start transition-colors", isActive && clampedSeconds > 5 && "animate-energy-pulse")}
+            style={{ backgroundImage: countdownRing }}
+            role="timer"
+            aria-live="polite"
+            aria-label={answering ? `${clampedSeconds} seconds left to answer` : "Answer window closed"}
+          >
             <div className="grid h-full w-full place-items-center rounded-full bg-navy-deep text-center">
-              <p className="text-[10px] font-bold text-white/50">Locks</p>
-              <p className="-mt-1 font-data text-lg font-black text-white">{card.lockAt}&apos;</p>
+              {answering ? (
+                <>
+                  <p className="-mb-1 font-data text-xl font-black text-white tabular-nums">{clampedSeconds}</p>
+                  <p className="text-[9px] font-bold uppercase tracking-wide text-white/50">sec</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-[10px] font-bold text-white/50">Locked</p>
+                  <p className="-mt-1 font-data text-sm font-black text-white">{card.lockAt}&apos;</p>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -1486,8 +1592,8 @@ function PredictionPanel({
                 : state === "locked"
                   ? "Answer locked. Waiting for resolving update."
                   : state === "answered"
-                    ? "Answer saved. Locking with server time."
-                    : "Answer before the next resolving TxLINE update."}
+                    ? `Answer saved. ${clampedSeconds}s left to change it.`
+                    : `Answer within ${clampedSeconds}s, before the window closes.`}
             </p>
             <p className="break-words text-xs text-white/[0.54]">{state === "resolved" ? resolved?.explanation : `Resolution source: ${card.source.endpoint}`}</p>
           </div>
