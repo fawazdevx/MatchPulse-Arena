@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   txLineClockFromRecord,
   txLineEventTypeFromRecord,
+  txLineRecordHasScore,
   txLineScoreFromRecord,
   txLineTeamSideFromRecord,
   txLineUpdateIdFromRecord
@@ -79,4 +80,14 @@ test("preserves halftime and full-time phases from soccer status codes", () => {
   assert.equal(txLineClockFromRecord({ statusSoccerId: "HT", clock: { running: false, seconds: 2700 } }, "live").phase, "half");
   assert.equal(txLineClockFromRecord({ statusSoccerId: "F", clock: { running: false, seconds: 5400 } }, "live").phase, "full");
   assert.equal(txLineEventTypeFromRecord({ statusSoccerId: "F", action: "status" }), "full_time");
+});
+
+test("detects whether a record actually carries a score", () => {
+  // Real score payloads report presence so the live loop keeps them.
+  assert.equal(txLineRecordHasScore({ scoreSoccer: { Participant1: { Total: { Goals: 2 } }, Participant2: { Total: { Goals: 1 } } } }), true);
+  assert.equal(txLineRecordHasScore({ HomeScore: 0, AwayScore: 0 }), true);
+  // Clock/card/keep-alive records carry no score — must not zero-default over a real score.
+  assert.equal(txLineRecordHasScore({ statusSoccerId: "H2", dataSoccer: { Minutes: 55 } }), false);
+  assert.equal(txLineRecordHasScore({ dataSoccer: { YellowCard: true, Participant: 11 } }), false);
+  assert.equal(txLineRecordHasScore(undefined), false);
 });
