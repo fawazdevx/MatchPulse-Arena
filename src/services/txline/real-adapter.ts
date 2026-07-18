@@ -447,8 +447,12 @@ export class RealTxLineAdapter implements TxLineAdapter {
       signal
     )) {
       if (message.source === "score") {
+        // The score stream/updates are already scoped to this fixture via the
+        // `?fixtureId=` query param, so records frequently omit the id. Allowing
+        // missing ids here matches the snapshot path (latestRecord) — without it
+        // every scoped score update is dropped and the live score never moves.
         const records = recordsFromPayload(message.payload)
-          .filter((record) => matchesFixture(record, matchId, false))
+          .filter((record) => matchesFixture(record, matchId, true))
           .sort((a, b) => recordTimestamp(a) - recordTimestamp(b));
 
         for (const record of records) {
