@@ -12,6 +12,10 @@ const memoryUsers = new Map<string, any>();
 const memorySessions = new Map<string, any>();
 const memoryTokens = new Map<string, string>();
 
+function hasDatabase() {
+  return process.env.MATCHPULSE_DISABLE_DATABASE !== "1" && Boolean(process.env.DATABASE_URL && prismaAvailable);
+}
+
 function nowPlus(ms: number) {
   return new Date(Date.now() + ms);
 }
@@ -88,7 +92,7 @@ export async function createWalletNonce(walletAddress: string, origin: string) {
   const issuedAt = new Date();
   const message = buildSignInMessage(normalizedWallet, nonce, origin, issuedAt);
 
-  if (!process.env.DATABASE_URL || !prismaAvailable) {
+  if (!hasDatabase()) {
     const session = {
       id: crypto.randomBytes(12).toString("hex"),
       userId: undefined,
@@ -132,7 +136,7 @@ export async function verifyWalletSignature(input: {
   signature: string;
 }) {
   const normalizedWallet = new PublicKey(input.walletAddress).toBase58();
-  if (!process.env.DATABASE_URL || !prismaAvailable) {
+  if (!hasDatabase()) {
     const session = memorySessions.get(input.sessionId);
     if (!session || session.walletAddress !== normalizedWallet || session.revokedAt) {
       throw new Error("Wallet session was not found.");
@@ -246,7 +250,7 @@ export async function getSessionFromRequest(request: Request) {
   const sessionToken = parseCookie(request.headers.get("cookie"), SESSION_COOKIE);
   if (!sessionToken) return null;
 
-  if (!process.env.DATABASE_URL || !prismaAvailable) {
+  if (!hasDatabase()) {
     const sessionId = memoryTokens.get(hashToken(sessionToken));
     const session = sessionId ? memorySessions.get(sessionId) : null;
     if (!session || !session.verifiedAt || !session.user || session.expiresAt.getTime() < Date.now()) {
@@ -280,7 +284,7 @@ export async function revokeSessionFromRequest(request: Request) {
   const sessionToken = parseCookie(request.headers.get("cookie"), SESSION_COOKIE);
   if (!sessionToken) return;
 
-  if (!process.env.DATABASE_URL || !prismaAvailable) {
+  if (!hasDatabase()) {
     const tokenHash = hashToken(sessionToken);
     const sessionId = memoryTokens.get(tokenHash);
     if (sessionId) {

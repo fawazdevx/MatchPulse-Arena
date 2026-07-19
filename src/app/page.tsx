@@ -41,6 +41,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { TeamCrest } from "@/components/TeamCrest";
 import { HomeScreen, type SetupState } from "@/components/arena/HomeScreen";
+import { creatorRoomErrorMessage } from "@/services/creator-room/errors";
 import { badgeById, badges } from "@/services/game/badges";
 import { createPredictionFromTick, resolvePredictionFromTick } from "@/services/game/prediction-engine";
 import { txLineEndpoints } from "@/services/txline/endpoints";
@@ -1879,9 +1880,15 @@ function CreatorScreen({
           matchId: fixture?.id
         })
       });
-      const data = (await response.json()) as { inviteUrl?: string; widgetUrl?: string; widgetEmbed?: string; persisted?: boolean; error?: string; message?: string };
+      const data = (await response.json().catch(() => ({}))) as {
+        inviteUrl?: string;
+        widgetUrl?: string;
+        widgetEmbed?: string;
+        persisted?: boolean;
+        code?: string;
+      };
       if (!response.ok || !data.inviteUrl || !data.persisted) {
-        setStatus({ tone: "error", message: data.error ?? data.message ?? "Creator Cup room could not be launched yet." });
+        setStatus({ tone: "error", message: creatorRoomErrorMessage(data.code, response.status) });
         return;
       }
 
@@ -1893,7 +1900,7 @@ function CreatorScreen({
       });
       setStatus({ tone: "success", message: "Room is live and ready to share." });
     } catch {
-      setStatus({ tone: "error", message: "Network error while launching. Try again." });
+      setStatus({ tone: "error", message: "We couldn't reach MatchPulse. Check your connection and try again." });
     } finally {
       setLaunching(false);
     }

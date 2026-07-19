@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma, prismaAvailable } from "@/lib/prisma";
-import { jsonError } from "@/lib/server/http";
 import { getSessionFromRequest } from "@/services/auth/wallet-session";
+import { creatorRoomErrorMessage, type CreatorRoomErrorCode } from "@/services/creator-room/errors";
 import { seedBadges, upsertMatchFixture } from "@/services/storage/game-store";
 import { getTxLineAdapter, TxLineSetupError } from "@/services/txline";
 import type { MatchFixture } from "@/lib/types";
@@ -27,14 +27,36 @@ function widgetEmbed(origin: string, inviteCode: string) {
   return `<iframe src="${origin}/widget/${inviteCode}" width="360" height="640"></iframe>`;
 }
 
+function creatorRoomError(code: CreatorRoomErrorCode, status: number) {
+  return NextResponse.json(
+    {
+      persisted: false,
+      code,
+      message: creatorRoomErrorMessage(code, status)
+    },
+    { status }
+  );
+}
+
+function logCreatorRoomError(stage: string, error: unknown) {
+  const errorId = crypto.randomUUID();
+  console.error(`[creator-room:${stage}] ${errorId}`, error);
+}
+
 export async function POST(request: Request) {
   const payload = await request.json().catch(() => null);
   if (!payload || typeof payload !== "object") {
-    return jsonError("Invalid JSON body.", 400);
+    return creatorRoomError("INVALID_REQUEST", 400);
   }
 
   const origin = new URL(request.url).origin;
-  const session = await getSessionFromRequest(request).catch(() => null);
+  let session;
+  try {
+    session = await getSessionFromRequest(request);
+  } catch (error) {
+    logCreatorRoomError("session", error);
+    return creatorRoomError("CREATOR_ROOM_UNAVAILABLE", 503);
+  }
   const creatorName = sanitizeText(payload.creatorName, "Creator Cup");
   const handle = sanitizeText(payload.handle, "@creator", 32);
   const sponsor = sanitizeText(payload.sponsor, "brand partner", 48);
@@ -43,28 +65,18 @@ export async function POST(request: Request) {
   const requestedMatchId = sanitizeText(payload.matchId, "", 64);
 
   if (!session) {
-    return jsonError("Connect and sign with a Solana wallet to create Creator Cup rooms.", 401);
+    return creatorRoomError("AUTH_REQUIRED", 401);
   }
 
   if (!process.env.DATABASE_URL || !prismaAvailable) {
-    return jsonError(
-      !prismaAvailable
-        ? "Prisma Client is not generated. Run npm run db:generate before persisting Creator Cup rooms."
-        : "DATABASE_URL is not set. Configure Postgres before persisting Creator Cup rooms.",
-      503
-    );
+    logCreatorRoomError("configuration", new Error("Creator room persistence is unavailable."));
+    return creatorRoomError("CREATOR_ROOM_UNAVAILABLE", 503);
   }
 
   try {
     const fixture = await resolveFixture(requestedMatchId);
     if (!fixture) {
-      return NextResponse.json(
-        {
-          persisted: false,
-          error: "No TxLINE fixture is available for this Creator Cup room. Select a live fixture after TxLINE credentials are configured."
-        },
-        { status: 422 }
-      );
+      return creatorRoomError("FIXTURE_UNAVAILABLE", 422);
     }
 
     await seedBadges();
@@ -152,23 +164,12 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     if (error instanceof TxLineSetupError) {
-      return NextResponse.json(
-        {
-          persisted: false,
-          error: "TxLINE credentials are required before Creator Cup rooms can be persisted.",
-          missing: error.missing
-        },
-        { status: 503 }
-      );
+      logCreatorRoomError("txline", error);
+      return creatorRoomError("TXLINE_UNAVAILABLE", 503);
     }
 
-    return NextResponse.json(
-      {
-        persisted: false,
-        error: error instanceof Error ? error.message : "Creator room persistence failed"
-      },
-      { status: 500 }
-    );
+    logCreatorRoomError("create", error);
+    return creatorRoomError("CREATOR_ROOM_CREATE_FAILED", 500);
   }
 }
 
