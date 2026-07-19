@@ -15,7 +15,7 @@ Watch any of the 104 World Cup matches, read live scores and *real-time market s
 
 ### Submission links
 - **Live demo:** https://matchpulsearena.vercel.app
-- **Demo video:** _add Loom/YouTube link_
+- **Demo video:** 
 - **Repo:** https://github.com/fawazdevx/MatchPulse-Arena
 - **Powered by:** TxLINE (live sports data + consensus odds) · Solana (wallet sign-in)
 
