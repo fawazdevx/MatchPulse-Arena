@@ -10,7 +10,7 @@
     "postinstall": "prisma generate",
     "test:auth": "node --experimental-strip-types --test src/services/auth/wallet-session.test.ts",
     "test:rules": "node --experimental-strip-types --test src/services/game/rules.test.ts",
-    "test:game": "node --experimental-strip-types --test src/services/game/rules.test.ts src/services/game/prediction-engine.test.ts src/services/auth/wallet-session.test.ts src/services/txline/normalizers.test.ts",
+    "test:game": "node --experimental-strip-types --test src/services/game/rules.test.ts src/services/game/prediction-engine.test.ts src/services/auth/wallet-session.test.ts src/services/creator-room/errors.test.ts src/services/txline/normalizers.test.ts",
     "test:smoke": "node scripts/smoke-test.mjs",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

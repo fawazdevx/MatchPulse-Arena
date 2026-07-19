@@ -4,7 +4,7 @@ import nacl from "tweetnacl";
 import { Keypair } from "@solana/web3.js";
 
 test("wallet sign-in nonces are origin-bound and one-time-use in memory mode", async () => {
-  delete process.env.DATABASE_URL;
+  process.env.MATCHPULSE_DISABLE_DATABASE = "1";
   const { createWalletNonce, getSessionFromRequest, verifyWalletSignature } = await import("./wallet-session.ts");
   const keypair = Keypair.generate();
   const walletAddress = keypair.publicKey.toBase58();
